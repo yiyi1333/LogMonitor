@@ -221,15 +221,6 @@ mvn test
 
 后端测试覆盖采集、解析、去重、错误分类、命名空间、Agent、LLM 配置和脱敏；前端测试覆盖路由、筛选器、国际化、主题、空数据和设置页；Agent 测试覆盖文件读取、预检和队列行为。
 
-## 版本策略 / Versioning
-
-三组件版本必须保持一致：`backend/pom.xml`、`agent/pom.xml`、`frontend/package.json` 和锁文件同时更新。
-
-| 场景 / Change type | 规则 / Rule | 示例 / Example |
-| --- | --- | --- |
-| 开发提交 / Development commit | patch `+0.0.1` | `1.0.1` -> `1.0.2` |
-| 正式发布 / Formal release | minor `+0.1.0`，patch 归零 | `1.0.1` -> `1.1.0` |
-
 发布脚本的 `--version` 只用于断言源码版本，不能覆盖版本号。版本变更后同步更新发布示例、Agent 运行时版本和受影响测试 fixture。
 
 ## 贡献 / Contributing
