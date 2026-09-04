@@ -1,0 +1,5 @@
+ALTER TABLE app_user
+    ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT TRUE;
+
+ALTER TABLE app_user
+    ADD COLUMN session_version BIGINT NOT NULL DEFAULT 0;

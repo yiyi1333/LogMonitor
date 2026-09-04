@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_USER=__APP_USER__
+JAVA_BIN=__JAVA_BIN__
+JAR_FILE=__APP_DIR__/logmonitor-backend.jar
+ENV_FILE=__ENV_FILE__
+CONFIG_DIR=__CONFIG_DIR__
+DATA_DIR=__DATA_DIR__
+PID_FILE="$DATA_DIR/logmonitor-backend.pid"
+LOG_FILE="$DATA_DIR/logmonitor-backend.log"
+STARTUP_TIMEOUT_SECONDS=${STARTUP_TIMEOUT_SECONDS:-60}
+HEALTH_URL=${HEALTH_URL:-}
+STOP_TIMEOUT_SECONDS=${STOP_TIMEOUT_SECONDS:-30}
+PROCESS_PID=""
+
+java_major() {
+    local value
+    value=$($JAVA_BIN -version 2>&1 | sed -n '1s/.*version "\([^"]*\)".*/\1/p')
+    if [[ $value == 1.* ]]; then echo "${value#1.}" | cut -d. -f1; else echo "${value%%.*}"; fi
+}
+
+load_env_file() {
+    local line key value
+    while IFS= read -r line || [[ -n $line ]]; do
+        line=${line%$'\r'}
+        [[ -z $line || $line == \#* ]] && continue
+        [[ $line == *=* ]] || { echo "Invalid environment entry in $ENV_FILE: $line" >&2; return 1; }
+        key=${line%%=*}
+        value=${line#*=}
+        [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+            echo "Invalid environment variable name in $ENV_FILE: $key" >&2
+            return 1
+        }
+        export "$key=$value"
+    done < "$ENV_FILE"
+}
+
+read_pid() {
+    [[ -f $PID_FILE ]] || return 1
+    IFS= read -r PROCESS_PID < "$PID_FILE" || return 1
+    [[ $PROCESS_PID =~ ^[0-9]+$ ]]
+}
+
+is_running() {
+    local command_line
+    read_pid || return 1
+    kill -0 "$PROCESS_PID" 2>/dev/null || return 1
+    if [[ -r /proc/$PROCESS_PID/cmdline ]]; then
+        command_line=$(tr '\0' ' ' < "/proc/$PROCESS_PID/cmdline")
+    else
+        command_line=$(ps -p "$PROCESS_PID" -o args= 2>/dev/null || true)
+    fi
+    [[ $command_line == *"$JAR_FILE"* ]]
+}
+
+show_status() {
+    if is_running; then
+        echo "LogMonitor backend is running (PID $PROCESS_PID); log: $LOG_FILE"
+        return 0
+    fi
+    rm -f "$PID_FILE"
+    echo "LogMonitor backend is stopped"
+    return 3
+}
+
+start_process() {
+    local elapsed=0
+    local health_url
+    [[ $(id -un) == "$APP_USER" ]] || {
+        echo "Start the backend as $APP_USER, for example: runuser -u $APP_USER -- $0 start" >&2
+        return 1
+    }
+    [[ -x $JAVA_BIN ]] || { echo "Java executable not found: $JAVA_BIN" >&2; return 1; }
+    [[ $(java_major) == 17 ]] || { echo "JDK 17 is required to start the backend" >&2; return 1; }
+    command -v nohup >/dev/null || { echo "Missing required command: nohup" >&2; return 1; }
+    command -v curl >/dev/null || { echo "Missing required command: curl" >&2; return 1; }
+    [[ -f $JAR_FILE ]] || { echo "Backend JAR not found: $JAR_FILE" >&2; return 1; }
+    [[ -r $ENV_FILE ]] || { echo "Backend environment file is not readable: $ENV_FILE" >&2; return 1; }
+    [[ -r $CONFIG_DIR/application.yml ]] || {
+        echo "Application configuration is not readable: $CONFIG_DIR/application.yml" >&2
+        return 1
+    }
+    [[ -r $CONFIG_DIR/application-prod.yml ]] || {
+        echo "Production application configuration is not readable: $CONFIG_DIR/application-prod.yml" >&2
+        return 1
+    }
+    [[ $STARTUP_TIMEOUT_SECONDS =~ ^[1-9][0-9]*$ ]] || {
+        echo "STARTUP_TIMEOUT_SECONDS must be a positive integer" >&2
+        return 2
+    }
+    if is_running; then
+        echo "LogMonitor backend is already running (PID $PROCESS_PID)"
+        return 0
+    fi
+
+    rm -f "$PID_FILE"
+    if grep -q 'replace-with-' "$ENV_FILE"; then
+        echo "Refusing to start: replace placeholders in $ENV_FILE" >&2
+        return 1
+    fi
+    load_env_file
+    health_url=${HEALTH_URL:-http://127.0.0.1:${SERVER_PORT:-8080}/api/health}
+    umask 0027
+    mkdir -p "$DATA_DIR"
+    touch "$LOG_FILE"
+    cd "$DATA_DIR"
+    nohup "$JAVA_BIN" -jar "$JAR_FILE" \
+        "--spring.config.additional-location=file:$CONFIG_DIR/" >> "$LOG_FILE" 2>&1 < /dev/null &
+    PROCESS_PID=$!
+    printf '%s\n' "$PROCESS_PID" > "$PID_FILE"
+
+    while ((elapsed < STARTUP_TIMEOUT_SECONDS)); do
+        sleep 1
+        elapsed=$((elapsed + 1))
+        if ! is_running; then
+            rm -f "$PID_FILE"
+            echo "LogMonitor backend failed to start; recent log output:" >&2
+            tail -n 50 "$LOG_FILE" >&2 || true
+            return 1
+        fi
+        if curl --fail --silent --show-error --max-time 2 "$health_url" >/dev/null 2>&1; then
+            echo "LogMonitor backend started with nohup (PID $PROCESS_PID); health: $health_url; log: $LOG_FILE"
+            return 0
+        fi
+    done
+    echo "Backend health check timed out after ${STARTUP_TIMEOUT_SECONDS}s: $health_url" >&2
+    tail -n 50 "$LOG_FILE" >&2 || true
+    stop_process >/dev/null || true
+    return 1
+}
+
+stop_process() {
+    local elapsed=0
+    [[ $STOP_TIMEOUT_SECONDS =~ ^[0-9]+$ ]] || { echo "STOP_TIMEOUT_SECONDS must be an integer" >&2; return 2; }
+    if ! is_running; then
+        rm -f "$PID_FILE"
+        echo "LogMonitor backend is already stopped"
+        return 0
+    fi
+    kill "$PROCESS_PID"
+    while ((elapsed < STOP_TIMEOUT_SECONDS)); do
+        sleep 1
+        elapsed=$((elapsed + 1))
+        if ! is_running; then
+            rm -f "$PID_FILE"
+            echo "LogMonitor backend stopped"
+            return 0
+        fi
+    done
+    echo "Graceful stop timed out; killing backend PID $PROCESS_PID" >&2
+    kill -KILL "$PROCESS_PID" 2>/dev/null || true
+    sleep 1
+    rm -f "$PID_FILE"
+    if kill -0 "$PROCESS_PID" 2>/dev/null; then
+        echo "Unable to stop LogMonitor backend PID $PROCESS_PID" >&2
+        return 1
+    fi
+    echo "LogMonitor backend stopped"
+}
+
+case "${1:-}" in
+    start) start_process ;;
+    stop) stop_process ;;
+    restart) stop_process; start_process ;;
+    status) show_status ;;
+    logs) tail -n "${LOG_LINES:-100}" "$LOG_FILE" ;;
+    *) echo "Usage: $0 {start|stop|restart|status|logs}" >&2; exit 2 ;;
+esac

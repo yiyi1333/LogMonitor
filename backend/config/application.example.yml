@@ -1,0 +1,54 @@
+spring:
+  messages:
+    basename: i18n/messages
+    encoding: UTF-8
+    fallback-to-system-locale: false
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+  application:
+    name: log-monitor
+  profiles:
+    default: local
+  jackson:
+    time-zone: UTC
+    default-property-inclusion: non_null
+  flyway:
+    enabled: true
+  session:
+    cookie:
+      http-only: true
+      same-site: strict
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: strict
+      timeout: 8h
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+log-monitor:
+  scan-interval-ms: ${LOG_SCAN_INTERVAL_MS:30000}
+  retention-days: 180
+  initial-lookback-days: 180
+  source-timezone: Asia/Shanghai
+  allowed-roots: ${LOG_SOURCE_ALLOWED_ROOTS:${LOG_ROOT:./logs}}
+  admin:
+    username: ${LOG_MONITOR_ADMIN_USERNAME:admin}
+    password: ${LOG_MONITOR_ADMIN_PASSWORD:change-me}
+  llm:
+    master-key: ${LLM_CONFIG_MASTER_KEY:}
+    allow-http: ${LLM_ALLOW_HTTP:false}
+    timeout-seconds: ${LLM_TIMEOUT_SECONDS:120}
+    test-timeout-seconds: ${LLM_TEST_TIMEOUT_SECONDS:15}
+    max-retries: ${LLM_MAX_RETRIES:2}
+    max-output-tokens: ${LLM_MAX_OUTPUT_TOKENS:2048}
+
+# Add local sources through the UI, or copy and customize this example:
+#  sources:
+#    - name: service-a
+#      path: ${LOG_ROOT:./logs}/service-a

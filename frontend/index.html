@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111311" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <script>
+      try {
+        const supported = ['zh-CN','zh-TW','en-US','ja-JP','ko-KR','es-ES','fr-FR','de-DE','pt-BR']
+        const storedLocale = localStorage.getItem('log-monitor-locale')
+        if (supported.includes(storedLocale)) document.documentElement.lang = storedLocale
+        const saved = localStorage.getItem('log-monitor-theme')
+        const preference = ['system', 'light', 'dark'].includes(saved) ? saved : 'system'
+        const theme = preference === 'system'
+          ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : preference
+        document.documentElement.dataset.theme = theme
+        document.documentElement.classList.toggle('dark', theme === 'dark')
+        document.documentElement.style.colorScheme = theme
+        document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#111311' : '#f4f6f3'
+      } catch {}
+    </script>
+    <title>Log Monitor</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

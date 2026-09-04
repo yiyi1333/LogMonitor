@@ -1,0 +1,33 @@
+ALTER TABLE app_user
+    MODIFY COLUMN created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3);
+
+ALTER TABLE api_access_minute
+    MODIFY COLUMN minute_at DATETIME NOT NULL;
+
+ALTER TABLE error_group
+    MODIFY COLUMN first_seen DATETIME(3) NOT NULL,
+    MODIFY COLUMN last_seen DATETIME(3) NOT NULL,
+    MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3);
+
+ALTER TABLE error_occurrence
+    MODIFY COLUMN occurred_at DATETIME(3) NOT NULL;
+
+ALTER TABLE collector_checkpoint
+    MODIFY COLUMN pending_text MEDIUMTEXT,
+    MODIFY COLUMN last_modified_at DATETIME(3),
+    MODIFY COLUMN last_collected_at DATETIME(3);
+
+ALTER TABLE ai_analysis
+    MODIFY COLUMN result_text MEDIUMTEXT,
+    MODIFY COLUMN created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3);
+
+ALTER TABLE access_event_dedup
+    MODIFY COLUMN occurred_at DATETIME(3) NOT NULL;
+
+ALTER TABLE access_dedup_baseline
+    MODIFY COLUMN minute_at DATETIME NOT NULL,
+    MODIFY COLUMN baseline_until DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3);
+
+CREATE INDEX idx_occurrence_uri_time
+    ON error_occurrence(inferred_uri(191), occurred_at);

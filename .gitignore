@@ -1,0 +1,50 @@
+# Operating systems and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# Local secrets
+.env
+.env.*
+!.env.example
+/backend/src/main/resources/application.yml
+/backend/src/main/resources/application-*.yml
+/backend/src/main/resources/application.yaml
+/backend/src/main/resources/application-*.yaml
+/backend/src/main/resources/application.properties
+/backend/src/main/resources/application-*.properties
+/backend/src/test/resources/application.yml
+/backend/src/test/resources/application.yaml
+/backend/src/test/resources/application.properties
+
+# Java and Maven
+backend/target/
+backend/data/
+backend/.m2/
+agent/target/
+agent/data/
+*.class
+*.pid
+*.mv.db
+*.trace.db
+
+# Node and frontend build output
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/.vite/
+frontend/*.tsbuildinfo
+backend/src/main/resources/static/
+release/
+
+# Logs and temporary files
+.runtime/
+*.log
+*.tmp
+*.swp
+*~
+!.gitkeep
+/output/
+/demo_log_file/

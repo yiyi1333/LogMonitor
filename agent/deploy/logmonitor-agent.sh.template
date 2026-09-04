@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_USER=__APP_USER__
+JAVA_BIN=__JAVA_BIN__
+JAR_FILE=__APP_DIR__/logmonitor-agent.jar
+CONFIG_FILE=__CONFIG_DIR__/agent.json
+DATA_DIR=__DATA_DIR__
+PID_FILE="$DATA_DIR/logmonitor-agent.pid"
+LOG_FILE="$DATA_DIR/logmonitor-agent.log"
+STARTUP_WAIT_SECONDS=${STARTUP_WAIT_SECONDS:-3}
+STOP_TIMEOUT_SECONDS=${STOP_TIMEOUT_SECONDS:-30}
+PROCESS_PID=""
+
+java_major() {
+    local value
+    value=$($JAVA_BIN -version 2>&1 | sed -n '1s/.*version "\([^"]*\)".*/\1/p')
+    if [[ $value == 1.8.* ]]; then echo 8; else echo "${value%%.*}"; fi
+}
+
+read_pid() {
+    [[ -f $PID_FILE ]] || return 1
+    IFS= read -r PROCESS_PID < "$PID_FILE" || return 1
+    [[ $PROCESS_PID =~ ^[0-9]+$ ]]
+}
+
+is_running() {
+    local command_line
+    read_pid || return 1
+    kill -0 "$PROCESS_PID" 2>/dev/null || return 1
+    if [[ -r /proc/$PROCESS_PID/cmdline ]]; then
+        command_line=$(tr '\0' ' ' < "/proc/$PROCESS_PID/cmdline")
+    else
+        command_line=$(ps -p "$PROCESS_PID" -o args= 2>/dev/null || true)
+    fi
+    [[ $command_line == *"$JAR_FILE"* ]]
+}
+
+show_status() {
+    if is_running; then
+        echo "LogMonitor Agent is running (PID $PROCESS_PID); log: $LOG_FILE"
+        return 0
+    fi
+    rm -f "$PID_FILE"
+    echo "LogMonitor Agent is stopped"
+    return 3
+}
+
+validate_start_environment() {
+    [[ $(id -un) == "$APP_USER" ]] || {
+        echo "Start the Agent as $APP_USER, for example: runuser -u $APP_USER -- $0 start" >&2
+        return 1
+    }
+    [[ -x $JAVA_BIN ]] || { echo "Java executable not found: $JAVA_BIN" >&2; return 1; }
+    [[ $(java_major) == 8 ]] || { echo "JDK 8 is required to start the Agent" >&2; return 1; }
+    command -v nohup >/dev/null || { echo "Missing required command: nohup" >&2; return 1; }
+    [[ -f $JAR_FILE ]] || { echo "Agent JAR not found: $JAR_FILE" >&2; return 1; }
+    [[ -r $CONFIG_FILE ]] || { echo "Agent configuration is not readable: $CONFIG_FILE" >&2; return 1; }
+    [[ $STARTUP_WAIT_SECONDS =~ ^[0-9]+$ ]] || { echo "STARTUP_WAIT_SECONDS must be an integer" >&2; return 2; }
+}
+
+preflight_agent() {
+    validate_start_environment
+    "$JAVA_BIN" -jar "$JAR_FILE" check --config "$CONFIG_FILE" --data "$DATA_DIR"
+}
+
+start_process() {
+    local skip_preflight=${1:-false}
+    local elapsed=0
+    if is_running; then
+        echo "LogMonitor Agent is already running (PID $PROCESS_PID)"
+        return 0
+    fi
+    if [[ $skip_preflight == true ]]; then validate_start_environment; else preflight_agent; fi
+
+    rm -f "$PID_FILE"
+    umask 0027
+    mkdir -p "$DATA_DIR"
+    touch "$LOG_FILE"
+    cd "$DATA_DIR"
+    nohup "$JAVA_BIN" -jar "$JAR_FILE" run --config "$CONFIG_FILE" --data "$DATA_DIR" \
+        >> "$LOG_FILE" 2>&1 < /dev/null &
+    PROCESS_PID=$!
+    printf '%s\n' "$PROCESS_PID" > "$PID_FILE"
+
+    while ((elapsed < STARTUP_WAIT_SECONDS)); do
+        sleep 1
+        elapsed=$((elapsed + 1))
+        if ! is_running; then
+            rm -f "$PID_FILE"
+            echo "LogMonitor Agent failed to start; recent log output:" >&2
+            tail -n 50 "$LOG_FILE" >&2 || true
+            return 1
+        fi
+    done
+    echo "LogMonitor Agent started with nohup (PID $PROCESS_PID); log: $LOG_FILE"
+}
+
+stop_process() {
+    local elapsed=0
+    [[ $STOP_TIMEOUT_SECONDS =~ ^[0-9]+$ ]] || { echo "STOP_TIMEOUT_SECONDS must be an integer" >&2; return 2; }
+    if ! is_running; then
+        rm -f "$PID_FILE"
+        echo "LogMonitor Agent is already stopped"
+        return 0
+    fi
+    kill "$PROCESS_PID"
+    while ((elapsed < STOP_TIMEOUT_SECONDS)); do
+        sleep 1
+        elapsed=$((elapsed + 1))
+        if ! is_running; then
+            rm -f "$PID_FILE"
+            echo "LogMonitor Agent stopped"
+            return 0
+        fi
+    done
+    echo "Graceful stop timed out; killing Agent PID $PROCESS_PID" >&2
+    kill -KILL "$PROCESS_PID" 2>/dev/null || true
+    sleep 1
+    rm -f "$PID_FILE"
+    if kill -0 "$PROCESS_PID" 2>/dev/null; then
+        echo "Unable to stop LogMonitor Agent PID $PROCESS_PID" >&2
+        return 1
+    fi
+    echo "LogMonitor Agent stopped"
+}
+
+restart_process() {
+    preflight_agent
+    stop_process
+    start_process true
+}
+
+case "${1:-}" in
+    start) start_process ;;
+    stop) stop_process ;;
+    restart) restart_process ;;
+    status) show_status ;;
+    logs) tail -n "${LOG_LINES:-100}" "$LOG_FILE" ;;
+    *) echo "Usage: $0 {start|stop|restart|status|logs}" >&2; exit 2 ;;
+esac
