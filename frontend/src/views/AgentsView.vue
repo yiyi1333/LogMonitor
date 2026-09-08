@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Ban, ChevronDown, CircleAlert, FolderOpen, HardDrive, RefreshCw, Server } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
@@ -14,6 +14,9 @@ const sources = ref<SourceStatus[]>([])
 const loading = ref(false)
 const actionId = ref<number>()
 const error = ref('')
+let inFlight: Promise<void> | undefined
+let timer: number | undefined
+let disposed = false
 const { t } = useI18n()
 const statusText = (status: string) => ({ ONLINE: t('agents.online'), OFFLINE: t('agents.offline'), BLOCKED: t('agents.blocked'), ERROR: t('agents.error'), WAITING: t('agents.waiting') }[status] || status)
 const fmtBytes = (value: number) => {
@@ -26,18 +29,30 @@ const fmtTime = (value?: string) => value ? formatDateTime(value) : t('agents.ne
 const online = computed(() => rows.value.filter(row => row.status === 'ONLINE').length)
 const agentSources = (id: number): SourceStatus[] => sources.value.filter(item => item.collectorType === 'AGENT' && item.agentId === id)
 
-async function load() {
-  loading.value = true
-  error.value = ''
-  try {
-    const [agents, sourceStatuses] = await Promise.all([api.get<AgentSummary[]>('/agents'), api.get<SourceStatus[]>('/sources/status')])
-    rows.value = agents.data
-    sources.value = Array.isArray(sourceStatuses.data)
-      ? sourceStatuses.data.filter(source => source && source.collectorType === 'AGENT')
-      : []
-  }
-  catch (reason) { error.value = errorMessage(reason) }
-  finally { loading.value = false }
+function load(background = false): Promise<void> {
+  if (disposed) return Promise.resolve()
+  if (inFlight) return inFlight
+  loading.value = !background
+  inFlight = (async () => {
+    try {
+      const [agents, sourceStatuses] = await Promise.allSettled([api.get<AgentSummary[]>('/agents'), api.get<SourceStatus[]>('/sources/status')])
+      if (disposed) return
+      if (agents.status === 'rejected') throw agents.reason
+      if (sourceStatuses.status === 'rejected') throw sourceStatuses.reason
+      rows.value = agents.value.data
+      sources.value = Array.isArray(sourceStatuses.value.data)
+        ? sourceStatuses.value.data.filter(source => source && source.collectorType === 'AGENT')
+        : []
+      error.value = ''
+    }
+    catch (reason) { if (!disposed) error.value = errorMessage(reason) }
+    finally { loading.value = false; inFlight = undefined }
+  })()
+  return inFlight
+}
+
+function refreshAutomatically() {
+  if (!document.hidden && actionId.value === undefined) void load(true)
 }
 
 async function revoke(row: AgentSummary) {
@@ -55,19 +70,29 @@ async function revoke(row: AgentSummary) {
   try {
     await api.delete(`/agents/${row.id}`)
     ElMessage.success(t('agents.revoked',{name:row.name}))
+    await inFlight
     await load()
   } catch (reason) { error.value = errorMessage(reason) }
   finally { actionId.value = undefined }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  timer = window.setInterval(refreshAutomatically, 10_000)
+  document.addEventListener('visibilitychange', refreshAutomatically)
+})
+onUnmounted(() => {
+  disposed = true
+  window.clearInterval(timer)
+  document.removeEventListener('visibilitychange', refreshAutomatically)
+})
 </script>
 
 <template>
   <div class="page">
-    <PageHeader :title="t('agents.title')" :subtitle="t('agents.subtitle')" :loading="loading" @refresh="load">
+    <PageHeader :title="t('agents.title')" :subtitle="t('agents.subtitle')" :loading="loading" @refresh="load()">
       <template #actions>
-        <button class="icon-button refresh" type="button" :title="t('agents.refresh')" :disabled="loading" @click="load">
+        <button class="icon-button refresh" type="button" :title="t('agents.refresh')" :disabled="loading" @click="load()">
           <RefreshCw :size="16" :class="{ spinning: loading }"/>
         </button>
       </template>

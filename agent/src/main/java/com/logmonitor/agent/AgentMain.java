@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.UUID;
 
 public final class AgentMain {
-    static final String VERSION = "1.0.2";
+    static final String VERSION = "1.0.3";
     private static final Path DEFAULT_CONFIG = Paths.get("/etc/logmonitor-agent/agent.json");
     private static final Path DEFAULT_DATA = Paths.get("/var/lib/logmonitor-agent");
 

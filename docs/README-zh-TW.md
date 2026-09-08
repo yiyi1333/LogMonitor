@@ -1,6 +1,6 @@
 # LogMonitor
 
-目前版本：**v1.0.2**
+目前版本：**v1.0.3**
 
 LogMonitor 是面向內部維運團隊的 Spring Boot 日誌分析平台，支援本機目錄與遠端 Agent 採集、錯誤分組、介面趨勢、脫敏及多供應商 LLM 分析。
 

@@ -21,8 +21,10 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 import java.util.regex.Pattern;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -123,24 +125,28 @@ public class AgentService {
     public void heartbeat(long agentId, AgentHeartbeatRequest request) {
         requireAgent(agentId);
         List<com.logmonitor.model.ApiModels.AgentSourceReport> reports = request.sources() == null ? List.of() : request.sources();
-        String lastError = reports.stream().map(com.logmonitor.model.ApiModels.AgentSourceReport::error)
-                .filter(value -> value != null && !value.isBlank()).findFirst().orElse(null);
-        mapper.updateHeartbeat(agentId, request.version(), optionalAddress(request.displayAddress(), null), Math.max(0, request.spoolBytes()),
-                request.spoolLimitBytes() > 0 ? request.spoolLimitBytes() : SPOOL_LIMIT_BYTES, Instant.now(), lastError);
+        Set<Long> sourceIds = mapper.agentSources(agentId).stream().map(Source::getId).collect(Collectors.toSet());
         for (var report : reports) {
+            if (!sourceIds.contains(report.sourceId())) continue;
             String status = switch (report.status()) {
                 case "ACTIVE", "ERROR", "BLOCKED", "VALIDATING" -> report.status();
                 default -> "ERROR";
             };
             String real = report.realPath() == null || report.realPath().isBlank() ? null : report.realPath();
             try {
-                mapper.updateSourceReport(agentId, report.sourceId(), status, abbreviate(report.error()), real,
+                mapper.updateSourceReport(agentId, report.sourceId(), status,
+                        "ACTIVE".equals(status) ? null : abbreviate(report.error()), real,
                         real == null ? null : sha256(real));
             } catch (DataIntegrityViolationException exception) {
                 mapper.updateSourceReport(agentId, report.sourceId(), "ERROR", "远端真实目录已被当前 Agent 的其他来源使用",
                         null, null);
             }
         }
+        // Persisted source results include center-side validation and retain errors for omitted sources.
+        String lastError = mapper.agentSources(agentId).stream().map(Source::getValidationError)
+                .filter(value -> value != null && !value.isBlank()).findFirst().orElse(null);
+        mapper.updateHeartbeat(agentId, request.version(), optionalAddress(request.displayAddress(), null), Math.max(0, request.spoolBytes()),
+                request.spoolLimitBytes() > 0 ? request.spoolLimitBytes() : SPOOL_LIMIT_BYTES, Instant.now(), lastError);
     }
 
     @Transactional

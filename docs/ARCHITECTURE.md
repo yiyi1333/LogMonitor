@@ -284,6 +284,8 @@ sequenceDiagram
 | 每 1 秒 | 按文件和偏移顺序尝试上传一个队列批次 |
 | 每 30 秒 | 上报版本、队列用量、来源校验和采集状态 |
 
+配置更新移除来源时，Agent 同步清理该来源的内存报告、文件状态和磁盘队列；目录恢复后，下一次成功扫描会用正常报告覆盖旧异常，无须重启 Agent。后端心跳只处理属于当前 Agent 且未删除的来源，先持久化校验结果，再从当前有效来源汇总 `collector_agent.last_error`。`ACTIVE` 报告清空该来源的校验错误；漏报来源保留其既有校验结果，后端检测到的真实目录冲突同样参与汇总。所有有效来源的错误消除后，服务器错误清空；离线和队列阻塞仍优先于错误、在线状态。
+
 Agent 先把 gzip 内容和 JSON 元数据分别原子写入磁盘队列，再推进本地游标。中心 ACK 后才删除队列文件，因此断网、Agent 重启或 ACK 丢失不会主动丢日志。队列达到 5GB 后暂停读取，保持现有批次并上报 `BLOCKED`。
 
 ### 5.4 批次接收与一致性
@@ -537,16 +539,18 @@ export PATH="$JAVA_HOME/bin:$PATH"
 
 ### 11.3 Linux 安装
 
+`v1.0.3` 的异常恢复修复不改变 API 字段和数据库结构。升级时先部署后端和前端，再升级 Agent：后端兼容现有 `v1.0.0` Agent，忽略它持续上报的已删除来源报告；新版 Agent 进一步在配置更新时清理内存旧报告。已存储的服务器旧异常会在下一次成功心跳汇总时修正，无须手工修改数据库。
+
 ```bash
-tar -xzf logmonitor-backend-1.0.2.tar.gz
-sudo ./logmonitor-backend-1.0.2/install.sh
+tar -xzf logmonitor-backend-1.0.3.tar.gz
+sudo ./logmonitor-backend-1.0.3/install.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.0.2.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.2/install.sh
+tar -xzf logmonitor-frontend-1.0.3.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.3/install.sh
 
-tar -xzf logmonitor-agent-1.0.2.tar.gz
-sudo ./logmonitor-agent-1.0.2/install.sh
+tar -xzf logmonitor-agent-1.0.3.tar.gz
+sudo ./logmonitor-agent-1.0.3/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -563,6 +567,8 @@ sudo ./logmonitor-agent-1.0.2/install.sh
 - 后端/Agent nohup 控制脚本 `status` 与 `logs`：进程 PID 和标准输出日志。
 
 中心超过 90 秒未收到心跳时显示 Agent 离线。来源状态含 `VALIDATING`、`ACTIVE`、`OFFLINE`、`BLOCKED` 和 `ERROR`。
+
+“服务器”页每 10 秒自动刷新 `/api/agents` 和 `/api/sources/status`，同步服务器错误、在线状态、需关注数量和挂载目录；页面隐藏时暂停，恢复可见后立即刷新，离开页面时清理定时器和监听器。自动和手动刷新共用请求防重入，后台刷新不显示整页加载遮罩；任一请求失败时保留已有数据并显示请求错误，下次成功后清除。正常网络下，后端处理恢复心跳后，页面在下一个 10 秒刷新周期内反映恢复结果；实际目录修复还需等待 Agent 现有的配置、扫描和心跳周期。
 
 ### 12.2 常见故障定位
 
@@ -589,10 +595,10 @@ sudo ./logmonitor-agent-1.0.2/install.sh
 
 ### 13.1 版本约定
 
-最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.2`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.3`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
 
 - 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
-- 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.2` -> `v1.1.0`。
+- 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.3` -> `v1.1.0`。
 - 只有用户明确说“大版本发布”时才将 major 加一、minor 和 patch 归零，例如 `v1.x.y` -> `v2.0.0`；不根据变更规模或兼容性自行升级 major。
 - 发布提交只执行一次对应的发布递增，不额外增加 patch；执行打包脚本本身不代表正式发布，也不修改版本。
 - 每次提交前同步两个 POM 的项目版本、前端 package 和锁文件的根版本、Agent 运行时版本、受影响测试 fixture、各语言 README 的当前版本及部署产物示例。依赖版本与 Flyway 结构版本独立维护。

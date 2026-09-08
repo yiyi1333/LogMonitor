@@ -312,6 +312,7 @@ final class AgentRuntime implements AutoCloseable {
     }
 
     private void clearRemovedSources(Set<Long> active) throws IOException {
+        reports.keySet().retainAll(active);
         List<String> removeKeys = new ArrayList<String>();
         for (Map.Entry<String, FileState> entry : state.files.entrySet()) {
             if (!active.contains(entry.getValue().sourceId)) removeKeys.add(entry.getKey());

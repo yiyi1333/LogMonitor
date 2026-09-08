@@ -47,6 +47,59 @@ class DistributedAgentIntegrationTest extends IntegrationTestSupport {
     @Autowired PasswordEncoder encoder;
 
     @Test
+    void clearsRecoveredErrorsWithoutClearingOtherOrOmittedSources() throws Exception {
+        MockHttpSession root = login("agentadmin", "AgentRoot123!");
+        Enrolled agent = enroll("recovery-agent", "host", "agentadmin", "AgentRoot123!");
+        long first = createSource(root, agent.id);
+        long second = createSource(root, agent.id, "/srv/logs/second");
+        heartbeatReports(agent, List.of(errorReport(first, "first failure"), errorReport(second, "second failure")));
+        assertAgent(root, agent, "ERROR", "first failure");
+
+        heartbeatReports(agent, List.of(Map.of("sourceId", first, "status", "ACTIVE", "error", "stale message")));
+        assertAgent(root, agent, "ERROR", "second failure");
+        assertThat(jdbc.queryForObject("SELECT validation_error FROM log_source WHERE id=?", String.class, first)).isNull();
+        heartbeatReports(agent, List.of());
+        assertAgent(root, agent, "ERROR", "second failure");
+
+        heartbeatReports(agent, List.of(Map.of("sourceId", second, "status", "ACTIVE")));
+        assertAgent(root, agent, "ONLINE", null);
+        assertThat(jdbc.queryForObject("SELECT last_error FROM collector_agent WHERE id=?", String.class, agent.id)).isNull();
+        jdbc.update("UPDATE collector_agent SET spool_bytes=spool_limit_bytes WHERE id=?", agent.id);
+        assertAgent(root, agent, "BLOCKED", null);
+        jdbc.update("UPDATE collector_agent SET last_seen_at=? WHERE id=?", java.sql.Timestamp.from(Instant.now().minusSeconds(120)), agent.id);
+        assertAgent(root, agent, "OFFLINE", null);
+    }
+
+    @Test
+    void ignoresDeletedUnknownAndForeignReportsFromLegacyAgents() throws Exception {
+        MockHttpSession root = login("agentadmin", "AgentRoot123!");
+        Enrolled agent = enroll("stale-agent", "host", "agentadmin", "AgentRoot123!");
+        Enrolled other = enroll("foreign-agent", "host", "agentadmin", "AgentRoot123!");
+        long deleted = createSource(root, agent.id);
+        long foreign = createSource(root, other.id);
+        heartbeatReports(agent, List.of(errorReport(deleted, "deleted failure")));
+        mvc.perform(delete("/api/sources/{id}", deleted).session(root).with(csrf())).andExpect(status().isNoContent());
+        heartbeatReports(agent, List.of(errorReport(deleted, "deleted failure"),
+                errorReport(foreign, "foreign failure"), errorReport(Long.MAX_VALUE, "unknown failure")));
+        assertAgent(root, agent, "ONLINE", null);
+        assertThat(jdbc.queryForObject("SELECT validation_status FROM log_source WHERE id=?", String.class, foreign)).isEqualTo("VALIDATING");
+        assertThat(jdbc.queryForObject("SELECT validation_error FROM log_source WHERE id=?", String.class, foreign)).isNull();
+    }
+
+    @Test
+    void includesCenterDetectedPathConflictsAndClearsThemAfterRecovery() throws Exception {
+        MockHttpSession root = login("agentadmin", "AgentRoot123!");
+        Enrolled agent = enroll("conflict-agent", "host", "agentadmin", "AgentRoot123!");
+        long first = createSource(root, agent.id);
+        long second = createSource(root, agent.id, "/srv/logs/alias");
+        heartbeat(agent, first, "ACTIVE", "/srv/logs/app");
+        heartbeat(agent, second, "ACTIVE", "/srv/logs/app");
+        assertAgent(root, agent, "ERROR", "远端真实目录已被当前 Agent 的其他来源使用");
+        heartbeat(agent, second, "ACTIVE", "/srv/logs/unique");
+        assertAgent(root, agent, "ONLINE", null);
+    }
+
+    @Test
     void enrollsValidatesIngestsDeduplicatesFiltersAndRevokesTwoAgents() throws Exception {
         MockHttpSession root = login("agentadmin", "AgentRoot123!");
         mapper.insertUser("agentoperator", encoder.encode("AgentUser123!"), "USER", false);
@@ -98,7 +151,7 @@ class DistributedAgentIntegrationTest extends IntegrationTestSupport {
         MvcResult result = mvc.perform(post("/api/agent/v1/enroll").contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsBytes(Map.of(
                                 "username", username, "password", password, "name", name,
-                                "hostName", host, "version", "1.0.2",
+                                "hostName", host, "version", "1.0.3",
                                 "roots", List.of(Map.of("path", "/srv/logs", "realPath", "/srv/logs"))))))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.token").isString()).andReturn();
         JsonNode body = json.readTree(result.getResponse().getContentAsByteArray());
@@ -106,19 +159,44 @@ class DistributedAgentIntegrationTest extends IntegrationTestSupport {
     }
 
     private long createSource(MockHttpSession session, long agentId) throws Exception {
+        return createSource(session, agentId, "/srv/logs/app");
+    }
+
+    private long createSource(MockHttpSession session, long agentId, String path) throws Exception {
         MvcResult result = mvc.perform(post("/api/sources").session(session).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(Map.of(
                                 "name", "order-service", "collectorType", "AGENT", "agentId", agentId,
-                                "path", "/srv/logs/app", "include", "*.log", "exclude", "*.error_*.log",
+                                "path", path, "include", "*.log", "exclude", "*.error_*.log",
                                 "startMode", "HISTORY_180D"))))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("VALIDATING")).andReturn();
         return json.readTree(result.getResponse().getContentAsByteArray()).get("id").asLong();
     }
 
+    private Map<String, Object> errorReport(long sourceId, String error) {
+        return Map.of("sourceId", sourceId, "status", "ERROR", "error", error);
+    }
+
+    private void heartbeatReports(Enrolled agent, List<Map<String, Object>> reports) throws Exception {
+        mvc.perform(post("/api/agent/v1/heartbeat").header("Authorization", bearer(agent))
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(Map.of(
+                                "version", "1.0.0", "spoolBytes", 0, "spoolLimitBytes", 5368709120L, "sources", reports))))
+                .andExpect(status().isNoContent());
+    }
+
+    private void assertAgent(MockHttpSession session, Enrolled agent, String state, String error) throws Exception {
+        MvcResult result = mvc.perform(get("/api/agents").session(session)).andExpect(status().isOk()).andReturn();
+        JsonNode agents = json.readTree(result.getResponse().getContentAsByteArray());
+        JsonNode found = null;
+        for (JsonNode item : agents) if (item.path("id").asLong() == agent.id) found = item;
+        assertThat(found).isNotNull();
+        assertThat(found.path("status").asText()).isEqualTo(state);
+        assertThat(found.path("lastError").asText(null)).isEqualTo(error);
+    }
+
     private void heartbeat(Enrolled agent, long sourceId, String state, String realPath) throws Exception {
         mvc.perform(post("/api/agent/v1/heartbeat").header("Authorization", bearer(agent))
                         .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(Map.of(
-                                "version", "1.0.2", "spoolBytes", 0, "spoolLimitBytes", 5368709120L,
+                                "version", "1.0.3", "spoolBytes", 0, "spoolLimitBytes", 5368709120L,
                                 "sources", List.of(Map.of("sourceId", sourceId, "status", state,
                                         "realPath", realPath, "files", 1, "bytesRead", 0,
                                         "totalBytes", 0, "parseErrors", 0))))))
