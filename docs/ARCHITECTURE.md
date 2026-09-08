@@ -538,15 +538,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 ### 11.3 Linux 安装
 
 ```bash
-tar -xzf logmonitor-backend-1.0.1.tar.gz
-sudo ./logmonitor-backend-1.0.1/install.sh
+tar -xzf logmonitor-backend-1.0.2.tar.gz
+sudo ./logmonitor-backend-1.0.2/install.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.0.1.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.1/install.sh
+tar -xzf logmonitor-frontend-1.0.2.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.2/install.sh
 
-tar -xzf logmonitor-agent-1.0.1.tar.gz
-sudo ./logmonitor-agent-1.0.1/install.sh
+tar -xzf logmonitor-agent-1.0.2.tar.gz
+sudo ./logmonitor-agent-1.0.2/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -586,6 +586,18 @@ sudo ./logmonitor-agent-1.0.1/install.sh
 - `deploy/mysql/logm-v5-incremental-cursor.sql`：仅供旧 V4 数据库升级，不能用于全新 V14 数据库。
 
 ## 13. 测试与发布门禁
+
+### 13.1 版本约定
+
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.2`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+
+- 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
+- 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.2` -> `v1.1.0`。
+- 只有用户明确说“大版本发布”时才将 major 加一、minor 和 patch 归零，例如 `v1.x.y` -> `v2.0.0`；不根据变更规模或兼容性自行升级 major。
+- 发布提交只执行一次对应的发布递增，不额外增加 patch；执行打包脚本本身不代表正式发布，也不修改版本。
+- 每次提交前同步两个 POM 的项目版本、前端 package 和锁文件的根版本、Agent 运行时版本、受影响测试 fixture、各语言 README 的当前版本及部署产物示例。依赖版本与 Flyway 结构版本独立维护。
+
+### 13.2 验证命令
 
 ```bash
 cd backend

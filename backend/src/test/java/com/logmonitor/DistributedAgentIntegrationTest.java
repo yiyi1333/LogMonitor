@@ -98,7 +98,7 @@ class DistributedAgentIntegrationTest extends IntegrationTestSupport {
         MvcResult result = mvc.perform(post("/api/agent/v1/enroll").contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsBytes(Map.of(
                                 "username", username, "password", password, "name", name,
-                                "hostName", host, "version", "1.0.1",
+                                "hostName", host, "version", "1.0.2",
                                 "roots", List.of(Map.of("path", "/srv/logs", "realPath", "/srv/logs"))))))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.token").isString()).andReturn();
         JsonNode body = json.readTree(result.getResponse().getContentAsByteArray());
@@ -118,7 +118,7 @@ class DistributedAgentIntegrationTest extends IntegrationTestSupport {
     private void heartbeat(Enrolled agent, long sourceId, String state, String realPath) throws Exception {
         mvc.perform(post("/api/agent/v1/heartbeat").header("Authorization", bearer(agent))
                         .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(Map.of(
-                                "version", "1.0.1", "spoolBytes", 0, "spoolLimitBytes", 5368709120L,
+                                "version", "1.0.2", "spoolBytes", 0, "spoolLimitBytes", 5368709120L,
                                 "sources", List.of(Map.of("sourceId", sourceId, "status", state,
                                         "realPath", realPath, "files", 1, "bytesRead", 0,
                                         "totalBytes", 0, "parseErrors", 0))))))
