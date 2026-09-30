@@ -1,0 +1,34 @@
+# Optional: initializes ONLY a new MySQL volume. Existing schemas need manual migration.
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      MYSQL_DATABASE: logm
+      MYSQL_USER: ${DB_USERNAME:-logmonitor}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/logm-init.sql:/docker-entrypoint-initdb.d/01-logm-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql --protocol=TCP -h 127.0.0.1 -u $$MYSQL_USER logm -e 'SELECT schema_version FROM schema_metadata' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      start_period: 60s
+      retries: 30
+  backend:
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: logm
+    depends_on:
+      mysql:
+        condition: service_healthy
+volumes:
+  mysql-data:

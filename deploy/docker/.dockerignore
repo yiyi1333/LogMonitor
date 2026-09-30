@@ -1,0 +1,9 @@
+**
+!backend.jar
+!agent.jar
+!frontend/
+!frontend/**
+!config/
+!config/**
+!nginx.conf
+!*.Dockerfile

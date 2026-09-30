@@ -1,0 +1,31 @@
+# Run separately on each collection host; no center dependencies or inbound ports.
+name: logmonitor-agent
+services:
+  agent:
+    image: logmonitor/agent:${LOGMONITOR_VERSION:?Set LOGMONITOR_VERSION}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      AGENT_UPLOAD_WORKERS: ${AGENT_UPLOAD_WORKERS:-2}
+      JAVA_TOOL_OPTIONS: ${AGENT_JAVA_OPTIONS:--Xmx256m}
+    volumes:
+      - type: bind
+        source: ${AGENT_CONFIG_DIR:-./agent-config}
+        target: /config
+        bind:
+          create_host_path: false
+      - agent-data:/data
+      - type: bind
+        source: ${AGENT_LOG_DIR:-./logs}
+        target: /logs
+        read_only: true
+        bind:
+          create_host_path: false
+volumes:
+  agent-data:

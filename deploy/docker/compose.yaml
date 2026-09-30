@@ -1,0 +1,47 @@
+name: logmonitor
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+services:
+  backend:
+    image: logmonitor/backend:${LOGMONITOR_VERSION:?Set LOGMONITOR_VERSION}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    logging: *logging
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: ${DB_HOST:?Set DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:-logm}
+      DB_USERNAME: ${DB_USERNAME:-logmonitor}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      LOG_MONITOR_ADMIN_USERNAME: ${LOG_MONITOR_ADMIN_USERNAME:-admin}
+      LOG_MONITOR_ADMIN_PASSWORD: ${LOG_MONITOR_ADMIN_PASSWORD:?Set admin password}
+      LLM_CONFIG_MASTER_KEY: ${LLM_CONFIG_MASTER_KEY:?Set master key}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      LOG_SOURCE_ALLOWED_ROOTS: /logs
+      LOG_ROOT: /logs
+      LOG_SCAN_INTERVAL_MS: ${LOG_SCAN_INTERVAL_MS:-30000}
+      INGEST_MAX_INFLIGHT: ${INGEST_MAX_INFLIGHT:-4}
+      JAVA_TOOL_OPTIONS: ${BACKEND_JAVA_OPTIONS:--XX:MaxRAMPercentage=70.0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ${CENTER_LOG_DIR:-./logs}
+        target: /logs
+        read_only: true
+        bind:
+          create_host_path: false
+  frontend:
+    image: logmonitor/frontend:${LOGMONITOR_VERSION:?Set LOGMONITOR_VERSION}
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${LISTEN_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-8081}:8080"

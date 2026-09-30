@@ -544,15 +544,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 `v1.0.3` 的异常恢复修复不改变 API 字段和数据库结构。升级时先部署后端和前端，再升级 Agent：后端兼容现有 `v1.0.0` Agent，忽略它持续上报的已删除来源报告；新版 Agent 进一步在配置更新时清理内存旧报告。已存储的服务器旧异常会在下一次成功心跳汇总时修正，无须手工修改数据库。
 
 ```bash
-tar -xzf logmonitor-backend-1.1.3.tar.gz
-sudo sh ./logmonitor-backend-1.1.3/start.sh
+tar -xzf logmonitor-backend-1.1.4.tar.gz
+sudo sh ./logmonitor-backend-1.1.4/start.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.1.3.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.1.3/install.sh
+tar -xzf logmonitor-frontend-1.1.4.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.1.4/install.sh
 
-tar -xzf logmonitor-agent-1.1.3.tar.gz
-sudo ./logmonitor-agent-1.1.3/install.sh
+tar -xzf logmonitor-agent-1.1.4.tar.gz
+sudo ./logmonitor-agent-1.1.4/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -597,7 +597,7 @@ sudo ./logmonitor-agent-1.1.3/install.sh
 
 ### 13.1 版本约定
 
-最新正式发布为 `v1.0.0`，当前源码版本为 `v1.1.3`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.1.4`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
 
 - 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
 - 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.3` -> `v1.1.0`。
@@ -719,3 +719,33 @@ python3 tools/deploy/directory_smoke.py --isolated --url "$BENCH_URL" \
 烟测创建匿名 Agent 和来源，运行 35 秒持续写日志和查询目录，核对访问数量与心跳推进；结束仅清理本机临时进程/目录，不自动删除中心的数据，因此不得连接生产。该次功能交付的源码版本为 v1.1.2，正式发布记录仍为 v1.0.0；该次生成三组件安装包，不自动部署生产。
 
 本次功能与并行采集验证结果见 [目录浏览验证报告](DIRECTORY_BROWSING_VALIDATION.md)。
+
+### Docker 运行与发布（v1.1.4）
+
+新增 deploy/docker 三个 Dockerfile、中心/可选空库 MySQL/独立 Agent Compose 和离线打包脚本，复用已通过测试的三组件安装包。后端使用 Corretto 17、Agent 使用 Corretto 8，均以 UID/GID 10001 运行；前端使用 Nginx，将 /api 同源代理到内网 backend:8080（8MiB 请求上限，180 秒读超时，动态 DNS）。后端健康检查成功后才启动前端；可选 MySQL 配置等待 schema_metadata 可查询后再启动后端。基础镜像 ID、digest、目标架构写入 IMAGES.txt，运行配置和密钥不进入镜像。
+
+中心默认连接已有 MySQL 8.0.36+ / V14 schema，生产启动只读校验、不自动迁移；可选 MySQL 8.4 空库用现有 deploy/mysql/logm-init.sql 初始化，数据持久化在命名卷。既有卷不重跑初始化，升级仍由 DBA 先应用包内 mysql/migrations 未执行的 SQL。本次不修改 schema、统计、事务提交后 ACK 或 180 天保留规则。
+
+中心与 Agent 分别将宿主日志根只读挂载到容器 /logs，目录选择与来源路径使用容器内路径；访问仍受允许根/真实路径检查。Agent 注册配置保存在 bind /config，游标和 spool 保存在命名卷 /data；不可共享给其他 Agent 或同时运行宿主旧进程。固定 UID 10001 需有日志读取与目录遍历权限。容器配置、心跳、上传和目录调度沿用原有实现。
+
+默认仅前端向宿主 127.0.0.1:8081 开放；数据库、后端不开放宿主端口，Agent 无入站端口。宿主 TLS 代理对外提供 HTTPS，Secure Cookie 默认开启；仅隔离 HTTP 验证可关闭。容器 restart unless-stopped，停止宽限 30 秒；健康失败只标记 unhealthy。json-file 日志 10MiB×3 轮转。升级/回退保留数据库卷、Agent 卷和配置，禁止用 down -v 作为常规停止命令；镜像回退不自动回退数据库。
+
+```bash
+export BACKEND_JAVA_HOME=/path/to/jdk-17
+export AGENT_JAVA_HOME=/path/to/jdk-8
+./deploy/release-all.sh
+# Linux amd64 包；arm64 通过 PLATFORM=linux/arm64 构建
+# 在目标机解压匹配架构的 Docker 包后：
+docker load -i images.tar
+cp .env.example .env
+chmod 600 .env
+mkdir -p logs
+# 编辑 .env 数据库、管理员密码和 LLM 主密钥
+docker compose config --quiet
+docker compose up -d --wait
+curl http://127.0.0.1:8081/api/health
+```
+
+完整中心、空库、Agent 注册、升级/停止命令见 [Docker 操作说明](../deploy/docker/README.md)。打包支持 linux/amd64 与 linux/arm64；平台文件与实际镜像架构必须一致。此次生成安装包不构成正式发布，不部署生产。
+
+Docker 自动化与真实容器验证边界见 [Docker 验证报告](DOCKER_VALIDATION.md)，可用 tools/deploy/docker_smoke.py 对离线包复现隔离烟测。

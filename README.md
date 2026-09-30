@@ -1,6 +1,6 @@
 # LogMonitor
 
-![Version](https://img.shields.io/badge/version-v1.1.3-1f6feb)
+![Version](https://img.shields.io/badge/version-v1.1.4-1f6feb)
 ![License](https://img.shields.io/badge/license-MIT-2ea44f)
 ![Backend](https://img.shields.io/badge/backend-Spring%20Boot%203%20%2F%20JDK%2017-6db33f)
 ![Frontend](https://img.shields.io/badge/frontend-Vue%203%20%2F%20TypeScript-42b883)
@@ -9,9 +9,9 @@
 
 LogMonitor is an operations-focused log analytics platform. It continuously ingests Spring Boot text logs from local directories or remote servers, recognizes requests and multi-line failures, aggregates trends by application namespace, and optionally sends redacted context to multiple LLM providers for analysis.
 
-当前版本 / Current version: **v1.1.3**
+当前版本 / Current version: **v1.1.4**
 
-采集目录支持中心本机与新版 Agent 的实时逐层下拉浏览，同时保留手动输入；远程节点需升级 Agent 至 1.1.3。
+采集目录支持中心本机与新版 Agent 的实时逐层下拉浏览，同时保留手动输入；远程节点需升级 Agent 至 1.1.4。
 
 ## 语言 / Languages
 
@@ -159,9 +159,9 @@ cd ../agent && export JAVA_HOME=/path/to/jdk-8 && ./deploy/release.sh
 当前版本产物示例 / Current artifact names:
 
 ```text
-release/logmonitor-frontend-1.1.3.tar.gz
-release/logmonitor-backend-1.1.3.tar.gz
-release/logmonitor-agent-1.1.3.tar.gz
+release/logmonitor-frontend-1.1.4.tar.gz
+release/logmonitor-backend-1.1.4.tar.gz
+release/logmonitor-agent-1.1.4.tar.gz
 ```
 
 安装脚本默认将后端以 nohup 运行在 `/opt/logmonitor/backend`，前端由 Nginx 提供并监听 `127.0.0.1:8081`，Agent 使用 `/opt/logmonitor-agent` 和 `/var/lib/logmonitor-agent`。生产入口必须由 TLS 反向代理保护并保持页面与 `/api` 同源。
@@ -239,3 +239,15 @@ LogMonitor is released under the [MIT License](LICENSE).
 ## 采集性能与隔离压测
 
 Agent 使用 `AGENT_UPLOAD_WORKERS`（默认 2，1–4）控制上传并发，中心使用 `INGEST_MAX_INFLIGHT`（默认 4，1–64）控制上传事务并发。配置、心跳与查询不占用上传许可，成功 ACK 仍保证事务已提交。压测入口、环境记录与容量验收边界见 [压测说明](tools/performance/README.md) 和 [架构文档](docs/ARCHITECTURE.md)。
+
+## Docker 部署
+
+源码支持后端、前端、Agent 三个容器镜像，部署与离线导入见 [Docker 操作说明](deploy/docker/README.md)。在构建机设置 JDK 17 / JDK 8 和合适的 Node 后，可一次生成所有安装包及 Docker 包：
+
+```bash
+export BACKEND_JAVA_HOME=/path/to/jdk-17
+export AGENT_JAVA_HOME=/path/to/jdk-8
+./deploy/release-all.sh
+```
+
+Docker 包默认 Linux amd64；arm64 主机需设置 `PLATFORM=linux/arm64` 打包。使用现有 MySQL 或可选空库配置，前端默认监听 `127.0.0.1:8081`，Agent 日志只读挂载，配置与队列持久化。
