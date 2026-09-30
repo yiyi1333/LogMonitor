@@ -46,15 +46,17 @@ public class AgentIngestService {
     private final LogParser parser;
     private final LogStorageService storage;
     private final SourceLockRegistry locks;
+    private final PipelineMetrics metrics;
 
     public AgentIngestService(AgentMapper agents, LogMonitorMapper mapper, LogSourceService sources,
-                              LogParser parser, LogStorageService storage, SourceLockRegistry locks) {
+                              LogParser parser, LogStorageService storage, SourceLockRegistry locks, PipelineMetrics metrics) {
         this.agents = agents;
         this.mapper = mapper;
         this.sources = sources;
         this.parser = parser;
         this.storage = storage;
         this.locks = locks;
+        this.metrics = metrics;
     }
 
     @Transactional
@@ -62,7 +64,9 @@ public class AgentIngestService {
                                 long compressedSize) {
         validateMetadata(metadata, compressedSize);
         ReentrantLock lock = locks.lock(metadata.sourceId());
+        long lockStart = System.nanoTime();
         lock.lock();
+        metrics.elapsed("sourceLock", lockStart);
         boolean unlockAfterTransaction = holdUntilTransactionCompletion(lock);
         try {
             if (agents.batchExists(metadata.batchId()) > 0) {
@@ -79,7 +83,10 @@ public class AgentIngestService {
             if (!"ACTIVE".equals(source.getValidationStatus())) {
                 throw error("SOURCE_NOT_READY", HttpStatus.CONFLICT, "日志源尚未通过 Agent 校验");
             }
+            long decompressionStart = System.nanoTime();
             byte[] raw = gunzip(compressed);
+            metrics.elapsed("decompress", decompressionStart);
+            metrics.add("rawBytes", raw.length);
             if (metadata.endOffset() - metadata.startOffset() != raw.length) {
                 throw error("BATCH_OFFSET_INVALID", HttpStatus.BAD_REQUEST, "批次偏移与内容长度不一致");
             }
@@ -112,8 +119,10 @@ public class AgentIngestService {
                     && (combined.endsWith("\n") || combined.endsWith("\r"));
             String ready = flush ? combined : split.complete();
             String nextPending = flush ? "" : split.pending();
+            long parseStart = System.nanoTime();
             ParsedBatch batch = ready.isBlank() ? new ParsedBatch(List.of(), List.of(), 0, null)
                     : parser.parse(source, ready, metadata.path(), combinedOffset);
+            metrics.elapsed("parse", parseStart);
             long nextPendingOffset = nextPending.isEmpty() ? metadata.endOffset()
                     : combinedOffset + split.complete().getBytes(source.getCharset()).length;
             Checkpoint checkpoint = new Checkpoint(source.getName(), source.getInstanceKey(), source.getId(),
@@ -121,7 +130,9 @@ public class AgentIngestService {
                     nextPendingOffset, nextPending, Base64.getEncoder().encodeToString(decoded.remaining()),
                     "ACTIVE", metadata.fileSize(), metadata.modifiedAt(), Instant.now(), batch.lastEventAt(), null,
                     batch.parseErrors());
+            long writeStart = System.nanoTime();
             storage.store(batch, checkpoint, existing);
+            metrics.elapsed("write", writeStart);
             agents.insertBatch(new BatchInsert(metadata.batchId(), agent.id(), source.getId(), metadata.fileKey(),
                     metadata.generation(), metadata.startOffset(), metadata.endOffset(), metadata.checksum()));
             return new AgentBatchAck("ACK", metadata.endOffset());
@@ -135,6 +146,7 @@ public class AgentIngestService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
+                metrics.add(status == STATUS_COMMITTED ? "ingestCommitted" : "ingestRolledBack", 1);
                 lock.unlock();
             }
         });

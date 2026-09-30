@@ -13,7 +13,7 @@ vi.mock('../src/api', () => ({
 import { api } from '../src/api'
 import AgentsView from '../src/views/AgentsView.vue'
 
-const row = { id: 2, uuid: 'agent-uuid', name: 'prod-01', hostName: 'app-01', displayAddress: '10.0.0.8', version: '1.0.4', status: 'ONLINE', spoolBytes: 1024, spoolLimitBytes: 4096, lastSeenAt: '2026-08-18T01:00:00Z', allowedRoots: ['/data/logs'], createdBy: 'admin', createdAt: '2026-08-18T00:00:00Z' }
+const row = { id: 2, uuid: 'agent-uuid', name: 'prod-01', hostName: 'app-01', displayAddress: '10.0.0.8', version: '1.0.5', status: 'ONLINE', spoolBytes: 1024, spoolLimitBytes: 4096, lastSeenAt: '2026-08-18T01:00:00Z', allowedRoots: ['/data/logs'], createdBy: 'admin', createdAt: '2026-08-18T00:00:00Z' }
 const source = (id: number, collectorType: 'LOCAL'|'AGENT', agentId?: number) => ({ id, sourceName: `source-${id}`, applicationNamespace: 'commerce', path: `/data/logs/source-${id}`, include: '*.log', exclude: '*.error_*.log', status: 'ACTIVE', files: 1, bytesRead: 10, totalBytes: 10, parseErrors: 0, collectorType, agentId, displayAddress: agentId ? '10.0.0.8' : 'local', instanceKey: agentId ? `agent-${agentId}` : 'local', startMode: 'NOW', namespaceMigrationStatus: 'IDLE' })
 const sourceStatuses = [source(12, 'AGENT', 2), source(13, 'AGENT', 3), source(14, 'LOCAL')]
 const HeaderStub = defineComponent({ props: { loading: Boolean }, setup(props, { slots }) { return () => h('header', { 'data-loading': String(props.loading) }, slots.actions?.()) } })
