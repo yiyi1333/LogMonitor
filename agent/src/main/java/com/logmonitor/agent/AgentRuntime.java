@@ -49,6 +49,7 @@ final class AgentRuntime implements AutoCloseable {
     private final Path remoteConfigPath;
     private final LocalConfig local;
     private final AgentHttpClient http;
+    private final java.util.concurrent.ExecutorService directoryExecutor = Executors.newSingleThreadExecutor();
     private final ScheduledExecutorService executor = Executors.newScheduledThreadPool(3);
     private final ExecutorService uploadExecutor;
     private final TreeMap<Path, BatchMetadata> queue = new TreeMap<Path, BatchMetadata>();
@@ -89,6 +90,13 @@ final class AgentRuntime implements AutoCloseable {
     }
 
     void run() throws InterruptedException {
+        directoryExecutor.submit(new Runnable(){public void run(){
+            while(!closed && !Thread.currentThread().isInterrupted()) {
+                try { directoryOnce(); }
+                catch(AgentHttpClient.DirectoryUnsupportedException unsupported){directoryPause(300000);}
+                catch(Exception failure){directoryPause(1000);}
+            }
+        }});
         executor.scheduleWithFixedDelay(guard("config", new Task() { public void run() throws Exception { pollConfiguration(); }}), 0, 10, TimeUnit.SECONDS);
         executor.scheduleWithFixedDelay(guard("scan", new Task() { public void run() throws Exception { scan(); }}), 1, 1, TimeUnit.MILLISECONDS);
         executor.scheduleWithFixedDelay(guard("heartbeat", new Task() { public void run() throws Exception { heartbeat(); }}), 3, 30, TimeUnit.SECONDS);
@@ -557,8 +565,23 @@ final class AgentRuntime implements AutoCloseable {
         };
     }
 
+    void directoryOnce() throws IOException {
+        AgentModels.DirectoryRequest request=http.directoryRequest();
+        if(request==null)return;
+        AgentModels.DirectoryResult result=new AgentModels.DirectoryResult();result.requestId=request.requestId;
+        try {
+            if(System.currentTimeMillis()>request.deadlineEpochMillis)result.errorCode="DIRECTORY_TIMEOUT";
+            else result.listing=AgentDirectoryReader.read(local.allowedRoots,request.path,request.query);
+        }catch(AgentDirectoryReader.DirectoryException error){result.errorCode=error.code;}
+        catch(Exception error){result.errorCode="DIRECTORY_UNAVAILABLE";}
+        http.directoryResult(result);
+    }
+    private void directoryPause(long millis){try{Thread.sleep(millis);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}}
+
     public void close() {
         closed = true;
+        http.closeDirectoryChannel();
+        directoryExecutor.shutdownNow();
         uploadExecutor.shutdownNow();
         executor.shutdownNow();
         try { executor.awaitTermination(10, TimeUnit.SECONDS); uploadExecutor.awaitTermination(35, TimeUnit.SECONDS); }

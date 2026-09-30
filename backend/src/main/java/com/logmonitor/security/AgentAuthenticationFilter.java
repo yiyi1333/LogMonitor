@@ -30,6 +30,9 @@ public class AgentAuthenticationFilter extends OncePerRequestFilter {
     }
 
     @Override
+    protected boolean shouldNotFilterAsyncDispatch() { return false; }
+
+    @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI().substring(request.getContextPath().length());
         return !path.startsWith("/api/agent/v1/") || "/api/agent/v1/enroll".equals(path);

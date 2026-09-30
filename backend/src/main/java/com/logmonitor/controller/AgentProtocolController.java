@@ -26,13 +26,16 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/agent/v1")
 public class AgentProtocolController {
+    private final com.logmonitor.service.DirectoryBrowseService directories;
     private final AgentService agents;
     private final AgentIngestService ingest;
     private final com.logmonitor.service.IngestAdmission admission;
     private final com.logmonitor.service.PipelineMetrics metrics;
 
     public AgentProtocolController(AgentService agents, AgentIngestService ingest,
-            com.logmonitor.service.IngestAdmission admission, com.logmonitor.service.PipelineMetrics metrics) {
+            com.logmonitor.service.IngestAdmission admission, com.logmonitor.service.PipelineMetrics metrics,
+            com.logmonitor.service.DirectoryBrowseService directories) {
+        this.directories = directories;
         this.agents = agents;
         this.ingest = ingest; this.admission = admission; this.metrics = metrics;
     }
@@ -50,6 +53,16 @@ public class AgentProtocolController {
         String etag = "\"" + configuration.revision() + "\"";
         if (etag.equals(ifNoneMatch)) return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(etag).build();
         return ResponseEntity.ok().eTag(etag).body(configuration);
+    }
+
+    @GetMapping("/directories/requests")
+    public org.springframework.web.context.request.async.DeferredResult<ResponseEntity<com.logmonitor.model.DirectoryModels.Request>> directoryRequests(Authentication authentication) {
+        return directories.poll(principal(authentication).id());
+    }
+
+    @PostMapping("/directories/results")
+    public ResponseEntity<Void> directoryResults(Authentication authentication,@RequestBody com.logmonitor.model.DirectoryModels.Result result) {
+        directories.complete(principal(authentication).id(),result);return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/heartbeat")

@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import PageHeader from '../components/PageHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import DirectoryPicker from '../components/DirectoryPicker.vue'
 import { api, errorMessage } from '../api'
 import type { AgentSummary, SourceOptions, SourceStatus } from '../types'
 import { formatDateTime } from '../format'
@@ -19,7 +20,8 @@ const namespaceDialog = ref(false)
 const actionId = ref<number | null>(null)
 const error = ref('')
 const formError = ref('')
-interface SourceDraft { name: string; applicationNamespace: string; path: string; include: string; exclude: string; startMode: 'NOW'|'HISTORY_180D'; error?: string }
+let nextDraftId = 0
+interface SourceDraft { draftId: number; name: string; applicationNamespace: string; path: string; include: string; exclude: string; startMode: 'NOW'|'HISTORY_180D'; error?: string }
 const form = reactive<{ collectorType: 'LOCAL'|'AGENT'; agentId?: number; sources: SourceDraft[] }>({ collectorType: 'LOCAL', sources: [] })
 const namespaceForm = reactive<{ id?: number; name: string; applicationNamespace: string }>({ name: '', applicationNamespace: '' })
 const refreshTimers: number[] = []
@@ -71,7 +73,7 @@ async function collectorChanged() {
 }
 
 function newDraft(startMode: 'NOW'|'HISTORY_180D'): SourceDraft {
-  return { name: '', applicationNamespace: '', path: '', include: options.value.defaultInclude, exclude: options.value.defaultExclude, startMode }
+  return { draftId: ++nextDraftId, name: '', applicationNamespace: '', path: '', include: options.value.defaultInclude, exclude: options.value.defaultExclude, startMode }
 }
 
 function addDraft() {
@@ -269,12 +271,12 @@ onBeforeUnmount(clearRefreshTimers)
           <button class="secondary-button compact" type="button" :disabled="form.sources.length>=50" @click="addDraft"><Plus :size="14"/>{{ t('sources.addRow') }}</button>
         </div>
         <div class="batch-source-list">
-          <section v-for="(row,index) in form.sources" :key="index" class="batch-source-row" :class="{invalid:row.error}">
+          <section v-for="(row,index) in form.sources" :key="row.draftId" class="batch-source-row" :class="{invalid:row.error}">
             <header><b>{{ t('sources.directoryRow',{row:index+1}) }}</b><button class="row-action" type="button" :disabled="form.sources.length===1" :title="t('sources.removeRow')" @click="removeDraft(index)"><X :size="14"/></button></header>
             <div class="batch-source-main">
               <label>{{ t('sources.serviceName') }}<el-input v-model="row.name" maxlength="80" autocomplete="off" :placeholder="t('sources.serviceExample')"/></label>
               <label>{{ t('sources.applicationNamespace') }}<el-input v-model="row.applicationNamespace" maxlength="80" autocomplete="off" :placeholder="t('sources.namespaceExample')"/></label>
-              <label class="batch-path">{{ t('sources.absolutePath') }}<el-input v-model="row.path" maxlength="1500" autocomplete="off" placeholder="/data/logs/account-service"/></label>
+              <label class="batch-path">{{ t('sources.absolutePath') }}<DirectoryPicker v-model="row.path" :agent-id="form.collectorType === 'AGENT' ? form.agentId : undefined" :active="dialog" :disabled="form.collectorType === 'AGENT' && !form.agentId"/></label>
             </div>
             <div class="batch-source-rules">
               <label>{{ t('sources.include') }}<el-input v-model="row.include" maxlength="255" autocomplete="off"/></label>

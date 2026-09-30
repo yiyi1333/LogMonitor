@@ -20,7 +20,7 @@ class IngestProtocolTest {
     @Test void fullAdmissionResponds503WithRetryAfterAndNeverStartsIngest() throws Exception {
         AgentIngestService ingest=mock(AgentIngestService.class);PipelineMetrics metrics=mock(PipelineMetrics.class);
         IngestAdmission admission=new IngestAdmission(1,new SourceLockRegistry(),metrics);
-        var controller=new AgentProtocolController(mock(AgentService.class),ingest,admission,metrics);
+        var controller=new AgentProtocolController(mock(AgentService.class),ingest,admission,metrics,mock(DirectoryBrowseService.class));
         LocaleSupport locale=mock(LocaleSupport.class);when(locale.error(anyString(),anyString())).thenReturn("busy");
         var mvc=MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(new ApiExceptionHandler(locale)).build();
         AgentBatchMetadata metadata=new AgentBatchMetadata("batch",2,"file","generation","/synthetic",0,0,0,Instant.now(),"UTF-8","checksum",true);

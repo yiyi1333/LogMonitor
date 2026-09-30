@@ -103,6 +103,27 @@ final class AgentHttpClient {
         } finally {deadline.cancel(false);if(!completed)connection.disconnect();}
     }
 
+    AgentModels.DirectoryRequest directoryRequest() throws IOException {
+        HttpURLConnection connection=open("/api/agent/v1/directories/requests","GET",true);
+        directoryConnection=connection;
+        try {
+            int status=connection.getResponseCode();
+            if(status==404 || status==405 || status==501)throw new DirectoryUnsupportedException();
+            return response(connection,AgentModels.DirectoryRequest.class,status);
+        } finally {directoryConnection=null;connection.disconnect();}
+    }
+    void directoryResult(AgentModels.DirectoryResult result) throws IOException {
+        HttpURLConnection connection=open("/api/agent/v1/directories/results","POST",true);
+        directoryConnection=connection;
+        connection.setReadTimeout(5000);
+        connection.setConnectTimeout(5000);
+        try {connection.setRequestProperty("Content-Type","application/json;charset=UTF-8");write(connection,json.writeValueAsBytes(result));response(connection,Void.class);}
+        finally {directoryConnection=null;connection.disconnect();}
+    }
+    private volatile HttpURLConnection directoryConnection;
+    void closeDirectoryChannel(){HttpURLConnection connection=directoryConnection;if(connection!=null)connection.disconnect();}
+    static final class DirectoryUnsupportedException extends IOException {}
+
     private HttpURLConnection open(String path, String method, boolean authenticated) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(serverUrl + path).openConnection();
         connection.setRequestMethod(method);

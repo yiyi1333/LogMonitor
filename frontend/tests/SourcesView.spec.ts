@@ -70,6 +70,7 @@ function mountView() {
       stubs: {
         PageHeader: PageHeaderStub,
         EmptyState: true,
+        DirectoryPicker: defineComponent({ props: ['modelValue'], emits: ['update:modelValue'], setup: (props, { emit }) => () => h(InputStub, { modelValue: props.modelValue, placeholder: '/data/logs/account-service', 'onUpdate:modelValue': (v: string) => emit('update:modelValue', v) }) }),
         ElDialog: DialogStub,
         ElInput: InputStub,
         ElSelect: true,

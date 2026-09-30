@@ -23,3 +23,10 @@ export interface LlmConnectionTest { success: boolean; latencyMs: number; messag
 export interface LlmDiscoveredModel { modelId: string; displayName: string; owner?: string; capabilityStatus: 'SUPPORTED'|'UNKNOWN'; alreadyConfigured: boolean }
 export interface LlmModelDiscovery { source: 'REMOTE'|'CATALOG'; catalogVersion?: string; warning?: string; models: LlmDiscoveredModel[] }
 export interface LlmModelImport { created: LlmModelOption[]; skippedModelIds: string[] }
+
+export interface DirectoryListing {
+  path: string | null
+  parentPath: string | null
+  directories: { name: string; path: string }[]
+  truncated: boolean
+}

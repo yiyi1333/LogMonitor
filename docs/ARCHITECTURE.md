@@ -544,15 +544,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 `v1.0.3` 的异常恢复修复不改变 API 字段和数据库结构。升级时先部署后端和前端，再升级 Agent：后端兼容现有 `v1.0.0` Agent，忽略它持续上报的已删除来源报告；新版 Agent 进一步在配置更新时清理内存旧报告。已存储的服务器旧异常会在下一次成功心跳汇总时修正，无须手工修改数据库。
 
 ```bash
-tar -xzf logmonitor-backend-1.1.1.tar.gz
-sudo sh ./logmonitor-backend-1.1.1/start.sh
+tar -xzf logmonitor-backend-1.1.2.tar.gz
+sudo sh ./logmonitor-backend-1.1.2/start.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.1.1.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.1.1/install.sh
+tar -xzf logmonitor-frontend-1.1.2.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.1.2/install.sh
 
-tar -xzf logmonitor-agent-1.1.1.tar.gz
-sudo ./logmonitor-agent-1.1.1/install.sh
+tar -xzf logmonitor-agent-1.1.2.tar.gz
+sudo ./logmonitor-agent-1.1.2/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -597,7 +597,7 @@ sudo ./logmonitor-agent-1.1.1/install.sh
 
 ### 13.1 版本约定
 
-最新正式发布为 `v1.0.0`，当前源码版本为 `v1.1.1`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.1.2`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
 
 - 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
 - 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.3` -> `v1.1.0`。
@@ -697,3 +697,25 @@ sudo bash deploy/rabbitmq/install.sh --management /opt/rabbitmq-packages
 后端从 `v1.1.1` 起，发布包入口改为 `start.sh` 和 `shutdown.sh`，支持直接执行或使用 `sh`（入口在解析 Bash 数组等语法前重新执行 Bash）。`sudo sh start.sh` 保留已有配置、准备安装目录并默认启动；首次配置可用 `sudo START_PROCESS=false sh start.sh`，配置及数据库准备好后再次执行默认入口。`sudo sh shutdown.sh` 复用已安装控制脚本的 PID 身份校验及限时优雅退出，不清理配置/数据。自定义 APP_DIR 时两个入口使用相同值。前端和 Agent 的安装入口保持原样。
 
 后端入口脚本回归可在本地运行 `python3 tools/deploy/test_backend_entrypoints.py`：用 sh/dash 和临时 DESTDIR 验证安装准备、配置/数据保留以及停止委托，不接触生产路径或启动 Java/MySQL。
+
+### 服务器目录浏览（v1.1.2）
+
+采集新增表单的绝对目录保留手动输入，并提供逐层下拉浏览；从所选节点允许挂载根开始，支持返回上级、选择当前目录、当前层名称搜索（300ms 防抖）和刷新。不自动修改输入值，切换节点、关闭对话框或删除目录行后忽略旧响应；未选择远程节点时禁用浏览。目录候选只读，不替代新增来源时的校验。
+
+`GET /api/sources/directories?agentId=&path=&query=` 使用现有 SOURCE_MANAGE 权限；未传 agentId 时由中心读取本机，传入时只由对应 Agent 读取。未传 path 返回允许根；响应包含 path、parentPath、directories（name/path）和 truncated，空路径/父目录可省略。只读取一层目录元数据，最多 200 项，名称排序；枚举循环预算 2 秒，截断时提示缩小搜索或手动输入，不读取文件正文。中心本机及 Agent 都用真实路径限制到允许根，拒绝非绝对路径、`..` 和符号链接越界。根内可读符号链接以真实路径返回。
+
+远程 Agent 使用独立线程调用 `GET /api/agent/v1/directories/requests` 长轮询（25 秒，无任务 204），收到 requestId/path/query/deadlineEpochMillis 后读取并向 `POST /api/agent/v1/directories/results` 返回 requestId、listing 或 errorCode。该通道认证 Bearer Token，并在异步派发时重新认证，撤销 Token 不因长轮询放行。请求只保存在内存，每个 Agent 最多一个执行中、一个待执行；管理端 8 秒超时，过期/重复或其他 Agent 的结果被忽略。中心重启后请求失效，由 UI 重试。目录线程不占用上传、配置或心跳调度，不持有 Agent 全局状态锁；中心本机用独立 2 线程、20 待执行任务的有界执行器。
+
+旧 Agent 未建立目录通道时返回 DIRECTORY_UNSUPPORTED；离线返回 DIRECTORY_AGENT_OFFLINE；忙碌、超时、无权限及目录不可读分别返回对应的 DIRECTORY_* 错误，界面保留手动输入。新 Agent 访问旧中心遇到 404/405/501 暂停目录轮询 5 分钟，其他采集流程不变。本地 Agent JSON 配置、心跳及上传协议不增加字段，不需要数据库迁移。正常在线点击响应目标为 3 秒内，网络/目录不可读时按超时边界处理。
+
+升级顺序为中心与前端先升级，再升级需要目录浏览的 Agent；无需停用旧 Agent，未升级节点可继续手动配置。目录回归覆盖本机和远程 HTTP、权限、路径边界、搜索与结果数量、请求隔离及超时；真实 Agent 并发目录/采集/心跳烟测命令如下，必须指向可丢弃隔离中心：
+
+```bash
+# BENCH_USER / BENCH_PASSWORD 通过受保护的环境提供
+python3 tools/deploy/directory_smoke.py --isolated --url "$BENCH_URL" \
+  --agent-java "$AGENT_JAVA_HOME/bin/java" --agent-jar agent/target/logmonitor-agent.jar
+```
+
+烟测创建匿名 Agent 和来源，运行 35 秒持续写日志和查询目录，核对访问数量与心跳推进；结束仅清理本机临时进程/目录，不自动删除中心的数据，因此不得连接生产。当前源码版本为 v1.1.2，正式发布记录仍为 v1.0.0；本次生成三组件安装包，不自动部署生产。
+
+本次功能与并行采集验证结果见 [目录浏览验证报告](DIRECTORY_BROWSING_VALIDATION.md)。

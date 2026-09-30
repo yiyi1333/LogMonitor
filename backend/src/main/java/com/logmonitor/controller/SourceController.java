@@ -29,13 +29,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/sources")
 @RequirePermission(AppPermission.SOURCE_MANAGE)
 public class SourceController {
+    private final com.logmonitor.service.DirectoryBrowseService directories;
     private final LogSourceService sources;
     private final LogCollectorService collector;
     private final QueryService queries;
     private final NamespaceMigrationService namespaceMigrations;
 
     public SourceController(LogSourceService sources, LogCollectorService collector, QueryService queries,
-                            NamespaceMigrationService namespaceMigrations) {
+                            NamespaceMigrationService namespaceMigrations, com.logmonitor.service.DirectoryBrowseService directories) {
+        this.directories = directories;
         this.sources = sources;
         this.collector = collector;
         this.queries = queries;
@@ -45,6 +47,12 @@ public class SourceController {
     @GetMapping("/status")
     public List<SourceStatus> statuses() {
         return queries.sourceStatuses();
+    }
+
+    @GetMapping("/directories")
+    public org.springframework.web.context.request.async.DeferredResult<com.logmonitor.model.DirectoryModels.Listing> directories(
+            @RequestParam(required=false) Long agentId, @RequestParam(required=false) String path, @RequestParam(required=false) String query) {
+        return directories.browse(agentId,path,query);
     }
 
     @GetMapping("/options")

@@ -1,4 +1,12 @@
 export const enUS = {
+  "sources.browse": "Browse server directories",
+  "sources.directoryBack": "Back",
+  "sources.directorySearch": "Search this directory",
+  "sources.directoryEmpty": "No subdirectories",
+  "sources.directorySelect": "Select current directory",
+  "sources.directoryTruncated": "Too many directories. Narrow the search or enter a path.",
+  "sources.directoryManual": "You can also enter an absolute path.",
+
   'common.requestFailed': 'Request failed',
   'common.cancel': 'Cancel',
   'common.save': 'Save',
@@ -293,6 +301,14 @@ export type LocaleMessages = Record<MessageKey, string>
 const locale = (overrides: Partial<LocaleMessages>): LocaleMessages => ({ ...enUS, ...overrides })
 
 export const zhCN = locale({
+  "sources.browse": "浏览服务器目录",
+  "sources.directoryBack": "返回上级",
+  "sources.directorySearch": "搜索当前层目录",
+  "sources.directoryEmpty": "没有子目录",
+  "sources.directorySelect": "选择当前目录",
+  "sources.directoryTruncated": "目录过多，请缩小搜索范围或手动输入路径。",
+  "sources.directoryManual": "也可以手动输入绝对路径。",
+
   'common.requestFailed': '请求失败', 'common.cancel': '取消', 'common.save': '保存', 'common.delete': '删除', 'common.edit': '编辑',
   'common.add': '新增', 'common.enable': '启用', 'common.disable': '停用', 'common.refresh': '刷新', 'common.query': '查询', 'common.close': '关闭',
   'common.all': '全部', 'common.default': '默认', 'common.enabled': '已启用', 'common.disabled': '已停用', 'common.configured': '已配置',
@@ -402,6 +418,14 @@ export const zhCN = locale({
 
 const compactLocale = (values: Partial<LocaleMessages>) => locale(values)
 export const zhTW = compactLocale({
+  "sources.browse": "瀏覽伺服器目錄",
+  "sources.directoryBack": "返回上層",
+  "sources.directorySearch": "搜尋目前層級目錄",
+  "sources.directoryEmpty": "沒有子目錄",
+  "sources.directorySelect": "選擇目前目錄",
+  "sources.directoryTruncated": "目錄過多，請縮小搜尋範圍或手動輸入路徑。",
+  "sources.directoryManual": "也可以手動輸入絕對路徑。",
+
   'common.cancel': '取消', 'common.save': '儲存', 'common.delete': '刪除', 'common.refresh': '重新整理', 'common.query': '查詢',
   'common.notConfigured': '未設定',
   'language.switch': '切換語言', 'language.section': '語言與地區', 'language.sectionHint': '顯示語言、日期、數字與 AI 分析輸出',
@@ -430,6 +454,14 @@ export const zhTW = compactLocale({
   'sources.migrationHint': '{name} 在保留期統計遷移期間會暫停採集，完成後自動恢復。',
 })
 export const jaJP = compactLocale({
+  "sources.browse": "サーバーディレクトリを参照",
+  "sources.directoryBack": "上へ",
+  "sources.directorySearch": "現在の階層を検索",
+  "sources.directoryEmpty": "サブディレクトリがありません",
+  "sources.directorySelect": "現在のディレクトリを選択",
+  "sources.directoryTruncated": "件数が多すぎます。検索を絞るかパスを入力してください。",
+  "sources.directoryManual": "絶対パスを手動入力することもできます。",
+
   'common.cancel': 'キャンセル', 'common.save': '保存', 'common.delete': '削除', 'common.refresh': '更新', 'common.query': '検索',
   'common.notConfigured': '未設定',
   'language.switch': '言語を切り替え', 'language.section': '言語と地域', 'language.sectionHint': '表示言語、日付、数値、AI 分析の出力',
@@ -458,6 +490,14 @@ export const jaJP = compactLocale({
   'sources.migrationHint': '{name} の収集は保存期間内の統計移行中に停止し、完了後に自動再開します。',
 })
 export const koKR = compactLocale({
+  "sources.browse": "서버 디렉터리 탐색",
+  "sources.directoryBack": "상위로",
+  "sources.directorySearch": "현재 단계 검색",
+  "sources.directoryEmpty": "하위 디렉터리 없음",
+  "sources.directorySelect": "현재 디렉터리 선택",
+  "sources.directoryTruncated": "디렉터리가 너무 많습니다. 검색 범위를 줄이거나 경로를 입력하세요.",
+  "sources.directoryManual": "절대 경로를 직접 입력할 수도 있습니다.",
+
   'common.cancel': '취소', 'common.save': '저장', 'common.delete': '삭제', 'common.refresh': '새로고침', 'common.query': '검색',
   'common.notConfigured': '구성되지 않음',
   'language.switch': '언어 전환', 'language.section': '언어 및 지역', 'language.sectionHint': '표시 언어, 날짜, 숫자 및 AI 분석 결과',
@@ -486,6 +526,14 @@ export const koKR = compactLocale({
   'sources.migrationHint': '{name}의 수집은 보존 기간 통계를 이동하는 동안 중지되고 완료 후 자동 재개됩니다.',
 })
 export const esES = compactLocale({
+  "sources.browse": "Explorar directorios del servidor",
+  "sources.directoryBack": "Volver",
+  "sources.directorySearch": "Buscar en este nivel",
+  "sources.directoryEmpty": "Sin subdirectorios",
+  "sources.directorySelect": "Seleccionar directorio actual",
+  "sources.directoryTruncated": "Demasiados directorios. Limite la búsqueda o introduzca una ruta.",
+  "sources.directoryManual": "También puede introducir una ruta absoluta.",
+
   'common.cancel': 'Cancelar', 'common.save': 'Guardar', 'common.delete': 'Eliminar', 'common.refresh': 'Actualizar', 'common.query': 'Buscar',
   'common.notConfigured': 'Sin configurar',
   'language.switch': 'Cambiar idioma', 'language.section': 'Idioma y región', 'language.sectionHint': 'Idioma, fechas, números y salida del análisis de IA',
@@ -514,6 +562,14 @@ export const esES = compactLocale({
   'sources.migrationHint': 'La recopilación de {name} se pausa mientras se migran las estadísticas retenidas y se reanuda al terminar.',
 })
 export const frFR = compactLocale({
+  "sources.browse": "Parcourir les répertoires du serveur",
+  "sources.directoryBack": "Retour",
+  "sources.directorySearch": "Rechercher dans ce niveau",
+  "sources.directoryEmpty": "Aucun sous-répertoire",
+  "sources.directorySelect": "Sélectionner le répertoire actuel",
+  "sources.directoryTruncated": "Trop de répertoires. Affinez la recherche ou saisissez un chemin.",
+  "sources.directoryManual": "Vous pouvez aussi saisir un chemin absolu.",
+
   'common.cancel': 'Annuler', 'common.save': 'Enregistrer', 'common.delete': 'Supprimer', 'common.refresh': 'Actualiser', 'common.query': 'Rechercher',
   'common.notConfigured': 'Non configuré',
   'language.switch': 'Changer de langue', 'language.section': 'Langue et région', 'language.sectionHint': "Langue d'affichage, dates, nombres et analyse IA",
@@ -542,6 +598,14 @@ export const frFR = compactLocale({
   'sources.migrationHint': 'La collecte de {name} est suspendue pendant la migration des statistiques conservées, puis reprend automatiquement.',
 })
 export const deDE = compactLocale({
+  "sources.browse": "Serververzeichnisse durchsuchen",
+  "sources.directoryBack": "Zurück",
+  "sources.directorySearch": "Diese Ebene durchsuchen",
+  "sources.directoryEmpty": "Keine Unterverzeichnisse",
+  "sources.directorySelect": "Aktuelles Verzeichnis auswählen",
+  "sources.directoryTruncated": "Zu viele Verzeichnisse. Suche eingrenzen oder Pfad eingeben.",
+  "sources.directoryManual": "Sie können auch einen absoluten Pfad eingeben.",
+
   'common.cancel': 'Abbrechen', 'common.save': 'Speichern', 'common.delete': 'Löschen', 'common.refresh': 'Aktualisieren', 'common.query': 'Suchen',
   'common.notConfigured': 'Nicht konfiguriert',
   'language.switch': 'Sprache wechseln', 'language.section': 'Sprache und Region', 'language.sectionHint': 'Anzeigesprache, Datums- und Zahlenformate sowie KI-Analyseausgabe',
@@ -570,6 +634,14 @@ export const deDE = compactLocale({
   'sources.migrationHint': 'Die Erfassung von {name} pausiert während der Migration aufbewahrter Statistiken und wird danach automatisch fortgesetzt.',
 })
 export const ptBR = compactLocale({
+  "sources.browse": "Explorar diretórios do servidor",
+  "sources.directoryBack": "Voltar",
+  "sources.directorySearch": "Pesquisar neste nível",
+  "sources.directoryEmpty": "Sem subdiretórios",
+  "sources.directorySelect": "Selecionar diretório atual",
+  "sources.directoryTruncated": "Muitos diretórios. Restrinja a pesquisa ou digite um caminho.",
+  "sources.directoryManual": "Também pode digitar um caminho absoluto.",
+
   'common.cancel': 'Cancelar', 'common.save': 'Salvar', 'common.delete': 'Excluir', 'common.refresh': 'Atualizar', 'common.query': 'Pesquisar',
   'common.notConfigured': 'Não configurado',
   'language.switch': 'Alterar idioma', 'language.section': 'Idioma e região', 'language.sectionHint': 'Idioma, datas, números e saída da análise de IA',

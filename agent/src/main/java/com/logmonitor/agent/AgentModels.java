@@ -8,6 +8,20 @@ import java.util.Map;
 final class AgentModels {
     private AgentModels() {}
 
+    static final class DirectoryEntry {
+        public String name; public String path;
+        DirectoryEntry() {} DirectoryEntry(String name,String path){this.name=name;this.path=path;}
+    }
+    static final class DirectoryListing {
+        public String path; public String parentPath; public List<DirectoryEntry> directories; public boolean truncated;
+        DirectoryListing() {} DirectoryListing(String path,String parentPath,List<DirectoryEntry> directories,boolean truncated){this.path=path;this.parentPath=parentPath;this.directories=directories;this.truncated=truncated;}
+    }
+    static final class DirectoryRequest {
+        public String requestId; public String path; public String query; public long deadlineEpochMillis;
+    }
+    static final class DirectoryResult {
+        public String requestId; public DirectoryListing listing; public String errorCode;
+    }
     static final class LocalConfig {
         public String serverUrl;
         public boolean allowHttp;
