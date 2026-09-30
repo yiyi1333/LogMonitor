@@ -366,7 +366,7 @@ public interface LogMonitorMapper {
 
     @Select("<script>SELECT g.id,g.fingerprint,g.service_name AS service,g.service_name AS applicationNamespace," +
             "CASE WHEN COUNT(DISTINCT o.source_id)=1 THEN MIN(o.source_id) END AS sourceId,g.category,g.exception_class,g.summary," +
-            "MIN(o.occurred_at) first_seen,MAX(o.occurred_at) last_seen,COUNT(*) occurrence_count,g.inferred_uri " +
+            "g.first_seen,MAX(o.occurred_at) last_seen,COUNT(*) occurrence_count,g.inferred_uri " +
             "FROM error_group g JOIN error_occurrence o ON o.group_id=g.id WHERE o.occurred_at BETWEEN #{from} AND #{to}" +
             "<if test='service != null and service != \"\"'> AND g.service_name=#{service}</if>" +
             "<if test='sourceId != null'> AND o.source_id=#{sourceId}</if>" +
@@ -374,7 +374,7 @@ public interface LogMonitorMapper {
             "<if test='category != null and category != \"\"'> AND g.category=#{category}</if>" +
             "<if test='endpoint != null and endpoint != \"\"'> AND g.inferred_uri=#{endpoint}</if>" +
             "<if test='keyword != null and keyword != \"\"'> AND (g.summary LIKE CONCAT('%',#{keyword},'%') OR g.exception_class LIKE CONCAT('%',#{keyword},'%'))</if> " +
-            "GROUP BY g.id,g.fingerprint,g.service_name,g.category,g.exception_class,g.summary,g.inferred_uri " +
+            "GROUP BY g.id,g.fingerprint,g.service_name,g.category,g.exception_class,g.summary,g.first_seen,g.inferred_uri " +
             "ORDER BY last_seen DESC LIMIT #{limit} OFFSET #{offset}</script>")
     List<ErrorGroupRow> errorGroups(@Param("from") Instant from,@Param("to") Instant to,@Param("service") String service,
                                     @Param("instanceKey") String instanceKey,@Param("sourceId") Long sourceId,@Param("category") String category,

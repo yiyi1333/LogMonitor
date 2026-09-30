@@ -34,6 +34,7 @@ class ErrorOccurrenceIntegrationTest extends IntegrationTestSupport {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
     @Autowired JdbcTemplate jdbc;
+    @Autowired com.logmonitor.mapper.LogMonitorMapper mapper;
 
     @Test
     void queriesStableStreamUpdatesDetailAndOccurrenceAnalysisSchema() throws Exception {
@@ -108,6 +109,40 @@ class ErrorOccurrenceIntegrationTest extends IntegrationTestSupport {
         jdbc.update("DELETE FROM error_occurrence WHERE id=?", thirdId);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM error_occurrence_ai_analysis WHERE occurrence_id=?",
                 Integer.class, thirdId)).isZero();
+    }
+
+    @Test
+    void groupFirstSeenIsHistoricalWhileCountsAndLastSeenRemainFiltered() throws Exception {
+        Instant historical = Instant.parse("2026-01-01T01:00:00Z");
+        Instant first = Instant.parse("2026-09-29T01:00:00Z");
+        Instant last = first.plusSeconds(60);
+        long group = insertGroup("historical-first-service", "SYSTEM", "Historical error", "SQLException");
+        insertOccurrence(group, historical, "worker", "old", "stack", "historical");
+        long firstId = insertOccurrence(group, first, "worker", "first", "stack", "first");
+        long lastId = insertOccurrence(group, last, "worker", "last", "stack", "last");
+        jdbc.update("UPDATE error_occurrence SET instance_key='instance-a' WHERE id=?", firstId);
+        jdbc.update("UPDATE error_occurrence SET instance_key='instance-b' WHERE id=?", lastId);
+        jdbc.update("UPDATE error_group SET first_seen=?,last_seen=?,occurrence_count=3 WHERE id=?",
+                java.sql.Timestamp.from(historical), java.sql.Timestamp.from(last), group);
+
+        Instant from = first.minusSeconds(1);
+        Instant to = last.plusSeconds(1);
+        MockHttpSession session = login();
+        mvc.perform(get("/api/errors/groups").session(session).param("service", "historical-first-service")
+                        .param("from", from.toString()).param("to", to.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].firstSeen").value(historical.toString()))
+                .andExpect(jsonPath("$.items[0].lastSeen").value(last.toString()))
+                .andExpect(jsonPath("$.items[0].occurrenceCount").value(2));
+        for (String instance : new String[]{"instance-a", "instance-b"}) {
+            var rows = mapper.errorGroups(from, to, "historical-first-service", instance, null,
+                    null, null, null, 20, 0);
+            assertThat(rows).hasSize(1);
+            assertThat(rows.get(0).firstSeen()).isEqualTo(historical);
+            assertThat(rows.get(0).occurrenceCount()).isEqualTo(1);
+            assertThat(rows.get(0).lastSeen()).isEqualTo(instance.equals("instance-a") ? first : last);
+        }
     }
 
     private long insertGroup(String service, String category, String summary, String exceptionClass) {

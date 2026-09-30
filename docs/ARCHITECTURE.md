@@ -322,7 +322,7 @@ Agent 先把 gzip 内容和 JSON 元数据分别原子写入磁盘队列，再�
 | 登录 | Session 登录和明确失败状态 |
 | 总览 | 应用命名空间/来源实例/自定义时间筛选，今天、昨天、7/14/30 天快捷区间，访问趋势、错误趋势和排行 |
 | 接口 | URI 分页、搜索、平均/峰值频率和趋势下钻 |
-| 错误 | 路由化的错误分组与错误日志流；日志流按命名空间聚合、来源下钻、10 秒增量检查、单次详情和独立 AI 分析 |
+| 错误 | 路由化的错误分组（展示历史首次发生时间）与错误日志流；日志流按命名空间聚合、来源下钻、10 秒增量检查、单次详情和独立 AI 分析 |
 | 采集 | 本地/远端来源、校验状态、游标进度、批量新增、命名空间迁移和删除 |
 | 服务器 | Agent 展示 IP、在线状态、版本、允许根、已挂载目录、队列和撤销 |
 | 用户 | ROOT 创建、停用、启用和删除普通用户 |
@@ -332,6 +332,8 @@ Agent 先把 gzip 内容和 JSON 元数据分别原子写入磁盘队列，再�
 主题偏好保存在浏览器 `localStorage`，支持跟随系统、浅色和深色。语言偏好使用 `log-monitor-locale` 保存，首次按 `navigator.languages` 匹配九种语言，未匹配时回退 `zh-CN`。Vue I18n、Element Plus、Day.js、Intl 与 ECharts 共享当前 locale，Axios 同步发送 `Accept-Language`。监控查询先选 `applicationNamespace`，再可选具体 `sourceId`；实例标签由后端统一输出 `displayAddress：applicationName（path）`，未选择来源时跨 Agent、跨目录求和。命名空间和实例选项只读取当前活动日志源；来源删除后立即从全局选项中移除并清理前端失效选择，已解析的历史统计仍按保留策略保存并可通过明确参数查询。
 
 错误模块的 `/errors/groups` 保留指纹聚合视图，`/errors/logs` 要求先选择应用命名空间，默认查询滚动最近 24 小时。筛选、排序和页码写入 URL；前端每 10 秒使用 `snapshotId` 调用增量接口。页面隐藏或用户暂停时停止轮询，恢复可见后立即补查；只有倒序第一页且表格位于顶部时自动刷新，否则显示新增数量，避免阅读位置跳动。进入 `/errors/logs/{occurrenceId}` 才读取完整脱敏消息和堆栈，进入详情不会自动产生 LLM 费用。
+
+错误分组列表与详情抽屉的“首次发生”读取 `error_group.first_seen`，不受查询时间范围和应用实例筛选影响；次数和最近发生仍按当前筛选内的记录统计，列表默认按最近发生倒序。历史首次时间以现有错误组保存值为准，不恢复已删除组的历史；命名空间迁移沿用现有重算规则。`v1.0.4` 复用已有 API 字段和数据库列，无须数据库迁移。
 
 API 成功数据保持稳定技术字段；用户可见失败统一返回 `{ code, message }`，`code` 是机器协议，`message` 由受限的 `Accept-Language` 本地化。上游 LLM 技术明细和日志内容保留原文。
 
@@ -542,15 +544,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 `v1.0.3` 的异常恢复修复不改变 API 字段和数据库结构。升级时先部署后端和前端，再升级 Agent：后端兼容现有 `v1.0.0` Agent，忽略它持续上报的已删除来源报告；新版 Agent 进一步在配置更新时清理内存旧报告。已存储的服务器旧异常会在下一次成功心跳汇总时修正，无须手工修改数据库。
 
 ```bash
-tar -xzf logmonitor-backend-1.0.3.tar.gz
-sudo ./logmonitor-backend-1.0.3/install.sh
+tar -xzf logmonitor-backend-1.0.4.tar.gz
+sudo ./logmonitor-backend-1.0.4/install.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.0.3.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.3/install.sh
+tar -xzf logmonitor-frontend-1.0.4.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.4/install.sh
 
-tar -xzf logmonitor-agent-1.0.3.tar.gz
-sudo ./logmonitor-agent-1.0.3/install.sh
+tar -xzf logmonitor-agent-1.0.4.tar.gz
+sudo ./logmonitor-agent-1.0.4/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -595,7 +597,7 @@ sudo ./logmonitor-agent-1.0.3/install.sh
 
 ### 13.1 版本约定
 
-最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.3`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.4`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
 
 - 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
 - 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.3` -> `v1.1.0`。
