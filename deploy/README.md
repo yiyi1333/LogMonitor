@@ -27,18 +27,18 @@ export PATH="$JAVA_HOME/bin:$PATH"
 
 ```text
 release/
-  logmonitor-frontend-1.0.5.tar.gz
-  logmonitor-frontend-1.0.5.tar.gz.sha256
-  logmonitor-backend-1.0.5.tar.gz
-  logmonitor-backend-1.0.5.tar.gz.sha256
-  logmonitor-agent-1.0.5.tar.gz
-  logmonitor-agent-1.0.5.tar.gz.sha256
+  logmonitor-frontend-1.0.6.tar.gz
+  logmonitor-frontend-1.0.6.tar.gz.sha256
+  logmonitor-backend-1.0.6.tar.gz
+  logmonitor-backend-1.0.6.tar.gz.sha256
+  logmonitor-agent-1.0.6.tar.gz
+  logmonitor-agent-1.0.6.tar.gz.sha256
 ```
 
 传输到目标机后先校验，例如：
 
 ```bash
-sha256sum -c logmonitor-backend-1.0.5.tar.gz.sha256
+sha256sum -c logmonitor-backend-1.0.6.tar.gz.sha256
 ```
 
 ## 安装后端
@@ -46,8 +46,8 @@ sha256sum -c logmonitor-backend-1.0.5.tar.gz.sha256
 后端目标机需要完整 JDK 17、`nohup` 和 `curl`。安装脚本安装纯 API JAR、nohup 控制脚本、两个安全 application 模板和 MySQL 运维脚本，不会覆盖已有配置；默认运行用户是执行 `sudo ./install.sh` 的原登录用户：
 
 ```bash
-tar -xzf logmonitor-backend-1.0.5.tar.gz
-cd logmonitor-backend-1.0.5
+tar -xzf logmonitor-backend-1.0.6.tar.gz
+cd logmonitor-backend-1.0.6
 sudo ./install.sh
 sudoedit /etc/logmonitor/backend.env
 sudoedit /etc/logmonitor/application.yml
@@ -75,8 +75,8 @@ curl http://127.0.0.1:8080/api/health
 前端目标机需要 Nginx。默认安装到 `/opt/logmonitor/frontend/releases/{版本}`，并原子更新 `current` 软链接；生成的 Nginx server 监听 `127.0.0.1:8081`，把 `/api` 代理到本机后端 `127.0.0.1:8080`：
 
 ```bash
-tar -xzf logmonitor-frontend-1.0.5.tar.gz
-cd logmonitor-frontend-1.0.5
+tar -xzf logmonitor-frontend-1.0.6.tar.gz
+cd logmonitor-frontend-1.0.6
 sudo SERVER_NAME=logmonitor.internal BACKEND_URL=http://127.0.0.1:8080 ./install.sh
 curl -I http://127.0.0.1:8081/
 ```
@@ -88,8 +88,8 @@ curl -I http://127.0.0.1:8081/
 Agent 目标机需要完整 JDK 8 和 `nohup`。安装脚本保留已有 `agent.json`、状态和 spool；首次安装后先确保执行安装的原登录用户对日志根目录具有只读权限，再注册并启动：
 
 ```bash
-tar -xzf logmonitor-agent-1.0.5.tar.gz
-cd logmonitor-agent-1.0.5
+tar -xzf logmonitor-agent-1.0.6.tar.gz
+cd logmonitor-agent-1.0.6
 sudo ./install.sh
 /usr/bin/java -jar /opt/logmonitor-agent/logmonitor-agent.jar \
   configure --config /etc/logmonitor-agent/agent.json
@@ -112,3 +112,7 @@ sudo ./install.sh
 - Agent：`APP_USER`、`APP_GROUP`、`APP_DIR`、`CONFIG_DIR`、`DATA_DIR`、`LEGACY_SERVICE_DIR`、`JAVA_BIN`、`CONFIGURE_AGENT`、`ALLOW_HTTP`、`START_PROCESS`；控制脚本另支持 `STARTUP_WAIT_SECONDS` 和 `STOP_TIMEOUT_SECONDS`。
 
 安装脚本面向 Linux。`APP_USER` 默认取 `SUDO_USER`，直接以 root 安装且未显式指定非 root 用户时会拒绝执行；兼容识别旧 `ENABLE_SERVICE` 变量，但新部署应使用 `START_PROCESS`。安装程序会停用并删除旧 systemd unit，避免重复启动。nohup 不提供开机自启、崩溃自动拉起或 systemd 资源隔离，主机重启后需要手工执行 `start` 或由外部运维平台调用。`DESTDIR` 模式仅验证文件布局，不能替代目标环境中的 JDK、Nginx、TLS、权限和进程恢复验证。
+
+### Agent 上传并发
+
+新 Agent 默认两个上传线程，可在启动进程的环境中设置 `AGENT_UPLOAD_WORKERS=1`（支持 1–4）。例如 `AGENT_UPLOAD_WORKERS=1 /opt/logmonitor-agent/logmonitor-agent.sh start`。不修改 agent.json，回退到旧发布包可继续使用原配置与 spool。配置、心跳按既有周期独立执行。

@@ -94,7 +94,7 @@ final class AgentHttpClient {
         int status = connection.getResponseCode();
         if (status >= 200 && status < 300) return response(connection, BatchAck.class, status);
         ApiError error = readError(connection);
-        throw new UploadException(status, error);
+        throw new UploadException(status, error, retryAfterMillis(connection.getHeaderField("Retry-After")));
     }
 
     private HttpURLConnection open(String path, String method, boolean authenticated) throws IOException {
@@ -146,13 +146,26 @@ final class AgentHttpClient {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
+    private static long retryAfterMillis(String value) {
+        if (value == null) return 0;
+        try { return Math.max(0, Math.min(3600000L, Long.parseLong(value) * 1000)); }
+        catch (NumberFormatException ignored) {
+            try { return Math.max(0, Math.min(3600000L, java.time.ZonedDateTime.parse(value,
+                    java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()-System.currentTimeMillis())); }
+            catch (RuntimeException invalid) { return 0; }
+        }
+    }
+
     static final class UploadException extends Exception {
         final int status;
         final ApiError error;
-        UploadException(int status, ApiError error) {
+        final long retryAfterMillis;
+        UploadException(int status, ApiError error) { this(status, error, 0); }
+        UploadException(int status, ApiError error, long retryAfterMillis) {
             super(error.message == null ? "HTTP " + status : error.message);
             this.status = status;
             this.error = error;
+            this.retryAfterMillis = retryAfterMillis;
         }
     }
 }

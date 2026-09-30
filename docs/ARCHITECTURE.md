@@ -544,15 +544,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 `v1.0.3` 的异常恢复修复不改变 API 字段和数据库结构。升级时先部署后端和前端，再升级 Agent：后端兼容现有 `v1.0.0` Agent，忽略它持续上报的已删除来源报告；新版 Agent 进一步在配置更新时清理内存旧报告。已存储的服务器旧异常会在下一次成功心跳汇总时修正，无须手工修改数据库。
 
 ```bash
-tar -xzf logmonitor-backend-1.0.5.tar.gz
-sudo ./logmonitor-backend-1.0.5/install.sh
+tar -xzf logmonitor-backend-1.0.6.tar.gz
+sudo ./logmonitor-backend-1.0.6/install.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.0.5.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.5/install.sh
+tar -xzf logmonitor-frontend-1.0.6.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.6/install.sh
 
-tar -xzf logmonitor-agent-1.0.5.tar.gz
-sudo ./logmonitor-agent-1.0.5/install.sh
+tar -xzf logmonitor-agent-1.0.6.tar.gz
+sudo ./logmonitor-agent-1.0.6/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -597,7 +597,7 @@ sudo ./logmonitor-agent-1.0.5/install.sh
 
 ### 13.1 版本约定
 
-最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.5`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.6`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
 
 - 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
 - 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.3` -> `v1.1.0`。
@@ -633,6 +633,10 @@ bash deploy/tests/nohup-control-test.sh
 发布前还需验证三个压缩包的 SHA-256、`DESTDIR` 安装布局，以及目标环境的真实 TLS 信任链、Nginx 配置、Linux 文件权限、nohup 启停与主机重启后的手工恢复、MySQL 迁移备份和目标日志量下的查询与恢复性能。
 
 ### 13.4 第一阶段容量观测
+
+Agent 读取使用单写线程，每轮按文件轮转读取，单轮最多 1 秒，有积压时连续读取；无工作时等待 1 秒。上传工作线程由 `AGENT_UPLOAD_WORKERS` 配置（默认 2，范围 1–4），不同来源并发，同一来源最多一批在途，成功后立即继续。网络请求移出全局状态锁；删除来源、截断和偏移回退协调在途任务，磁盘队列每分钟校准并维护内存索引，统计失败暂停读取。每分钟输出不含路径/正文/凭证的 `agent_metrics` JSON。上传失败退避 1–30 秒并加入抖动，遵守 Retry-After；本地配置格式不变，旧 Agent 回退不需要处理新增字段。
+
+
 
 `PipelineMetrics` 每分钟输出累计 JSON 统计，包含来源锁、解压、解析、写入耗时以及 JVM/GC/连接池状态，不输出日志正文、凭证和路径。匿名开放到达压测入口为 `tools/performance/benchmark.py`，通过真实 Agent 和上传事务核对访问/错误数量；压测只用于隔离环境，不自动清理服务端数据。MySQL 只读诊断脚本为 `tools/performance/mysql-observe.sql`。本地 H2 烟测不构成 100 台、100GB/天的容量验收。
 

@@ -31,6 +31,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.TreeMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -47,6 +50,18 @@ final class AgentRuntime implements AutoCloseable {
     private final LocalConfig local;
     private final AgentHttpClient http;
     private final ScheduledExecutorService executor = Executors.newScheduledThreadPool(3);
+    private final ExecutorService uploadExecutor;
+    private final TreeMap<Path, BatchMetadata> queue = new TreeMap<Path, BatchMetadata>();
+    private final Set<Long> inFlight = new HashSet<Long>();
+    private final Map<Long, Long> retryAt = new HashMap<Long, Long>();
+    private final Map<Long, Integer> failures = new HashMap<Long, Integer>();
+    private long cachedSpoolBytes;
+    private boolean diskHealthy = true;
+    private long readBytes, uploadedBytes, retries, heartbeatNanos, heartbeatCount;
+    private long previousReadBytes, previousUploadedBytes, previousReportNanos = System.nanoTime();
+    private int scanCursor;
+    private long lastUploadSource = -1;
+    private volatile boolean closed;
     private final Map<Long, SourceReport> reports = new HashMap<Long, SourceReport>();
     private RuntimeState state;
     private RemoteConfig remote;
@@ -58,101 +73,133 @@ final class AgentRuntime implements AutoCloseable {
         this.statePath = dataDirectory.resolve("state.json");
         this.remoteConfigPath = dataDirectory.resolve("sources.json");
         this.local = AgentFiles.read(configPath, LocalConfig.class);
+        String configuredWorkers = System.getenv("AGENT_UPLOAD_WORKERS");
+        int workers = configuredWorkers == null ? 2 : Integer.parseInt(configuredWorkers);
+        if (workers < 1 || workers > 4) throw new IllegalArgumentException("AGENT_UPLOAD_WORKERS must be 1..4");
+        this.uploadExecutor = Executors.newFixedThreadPool(workers);
         this.http = new AgentHttpClient(local.serverUrl, local.token, local.allowHttp);
         Files.createDirectories(spoolDirectory);
         this.state = Files.exists(statePath) ? AgentFiles.read(statePath, RuntimeState.class) : new RuntimeState();
         this.remote = Files.exists(remoteConfigPath) ? AgentFiles.read(remoteConfigPath, RemoteConfig.class) : new RemoteConfig();
         removeOrphanPayloads();
         recoverQueuedOffsets();
+        rebuildQueue();
     }
 
     void run() throws InterruptedException {
         executor.scheduleWithFixedDelay(guard("config", new Task() { public void run() throws Exception { pollConfiguration(); }}), 0, 10, TimeUnit.SECONDS);
-        executor.scheduleWithFixedDelay(guard("scan", new Task() { public void run() throws Exception { scan(); }}), 1, 10, TimeUnit.SECONDS);
-        executor.scheduleWithFixedDelay(guard("upload", new Task() { public void run() throws Exception { uploadOne(); }}), 2, 1, TimeUnit.SECONDS);
+        executor.scheduleWithFixedDelay(guard("scan", new Task() { public void run() throws Exception { scan(); }}), 1, 1, TimeUnit.MILLISECONDS);
         executor.scheduleWithFixedDelay(guard("heartbeat", new Task() { public void run() throws Exception { heartbeat(); }}), 3, 30, TimeUnit.SECONDS);
+        executor.scheduleWithFixedDelay(guard("metrics", new Task() { public void run() throws Exception { reportMetrics(); }}), 60, 60, TimeUnit.SECONDS);
+        int workers = ((java.util.concurrent.ThreadPoolExecutor) uploadExecutor).getCorePoolSize();
+        for (int i = 0; i < workers; i++) uploadExecutor.submit(new Runnable() {
+            public void run() {
+                while (!closed && !Thread.currentThread().isInterrupted()) {
+                    try { if (!uploadOne()) Thread.sleep(1000); }
+                    catch (InterruptedException exception) { Thread.currentThread().interrupt(); break; }
+                    catch (Exception exception) { System.err.println("Agent upload failed; retry scheduled"); }
+                }
+            }
+        });
         new CountDownLatch(1).await();
     }
 
-    synchronized void runOnce() throws Exception {
+    void runOnce() throws Exception {
         pollConfiguration();
         scan();
         while (uploadOne()) {}
         heartbeat();
     }
 
-    private synchronized void pollConfiguration() throws IOException {
-        RemoteConfig update = http.configuration(remote == null ? 0 : remote.revision);
+    private void pollConfiguration() throws IOException {
+        long revision;
+        synchronized (this) { revision = remote == null ? 0 : remote.revision; }
+        RemoteConfig update = http.configuration(revision);
         if (update == null) return;
-        Set<Long> active = new HashSet<Long>();
-        for (SourceConfig source : update.sources) active.add(source.id);
-        clearRemovedSources(active);
-        remote = update;
-        local.configRevision = update.revision;
-        AgentFiles.writeAtomic(remoteConfigPath, remote);
-        AgentFiles.writeAtomic(configPath, local);
-        AgentFiles.ownerOnly(configPath);
+        synchronized (this) {
+            Set<Long> active = new HashSet<Long>();
+            for (SourceConfig source : update.sources) active.add(source.id);
+            // Removed sources become ineligible immediately; physical cleanup waits for the in-flight upload.
+            remote = update;
+            clearRemovedSources(active);
+            local.configRevision = update.revision;
+            AgentFiles.writeAtomic(remoteConfigPath, remote);
+            AgentFiles.writeAtomic(configPath, local);
+            AgentFiles.ownerOnly(configPath);
+        }
     }
 
-    private synchronized void scan() throws Exception {
-        if (remote == null || remote.sources == null) return;
-        long available = local.spoolLimitBytes - spoolBytes();
-        for (SourceConfig source : remote.sources) {
-            SourceReport report = validate(source);
-            reports.put(source.id, report);
-            if (!"ACTIVE".equals(report.status) || available <= SPOOL_ENTRY_RESERVE) {
-                if (available <= SPOOL_ENTRY_RESERVE) report.status = "BLOCKED";
-                continue;
-            }
-            List<Path> files = matchingFiles(source);
-            report.files = files.size();
-            for (Path file : files) {
-                BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class);
-                report.totalBytes += attributes.size();
-                String fileKey = fileKey(file, attributes);
-                String key = source.id + "|" + fileKey;
-                FileState fileState = state.files.get(key);
-                if (fileState == null) {
-                    fileState = new FileState();
-                    fileState.sourceId = source.id;
-                    fileState.fileKey = fileKey;
-                    fileState.generation = UUID.randomUUID().toString();
-                    fileState.path = file.toString();
-                    fileState.offset = "NOW".equals(source.startMode) ? attributes.size() : 0;
-                    fileState.lastSize = attributes.size();
-                    fileState.stableSent = "NOW".equals(source.startMode);
-                    state.files.put(key, fileState);
-                    saveState();
-                } else if (attributes.size() < fileState.offset) {
-                    fileState.generation = UUID.randomUUID().toString();
-                    fileState.offset = 0;
-                    fileState.stableSent = false;
+    private void scan() throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        List<ScanFile> files = new ArrayList<ScanFile>();
+        synchronized (this) {
+            if (remote == null || remote.sources == null) return;
+            for (SourceConfig source : remote.sources) {
+                SourceReport report = validate(source);
+                reports.put(source.id, report);
+                if (!"ACTIVE".equals(report.status)) continue;
+                List<Path> paths = matchingFiles(source);
+                report.files = paths.size();
+                for (Path path : paths) {
+                    report.totalBytes += Files.size(path);
+                    files.add(new ScanFile(source, path));
                 }
-                fileState.path = file.toString();
-                long remaining = attributes.size() - fileState.offset;
-                if (remaining > 0 && available > SPOOL_ENTRY_RESERVE) {
-                    int length = (int) Math.min(Math.min(remaining, local.maxBatchBytes),
-                            available - SPOOL_ENTRY_RESERVE);
-                    byte[] bytes = read(file, fileState.offset, length);
-                    enqueue(source, fileState, attributes, bytes, false);
-                    available = local.spoolLimitBytes - spoolBytes();
-                    fileState.offset += bytes.length;
-                    fileState.lastSize = attributes.size();
-                    fileState.stableSent = false;
-                    saveState();
-                } else if (remaining == 0 && !fileState.stableSent && fileState.lastSize == attributes.size()
-                        && available > SPOOL_ENTRY_RESERVE) {
-                    enqueue(source, fileState, attributes, new byte[0], true);
-                    available = local.spoolLimitBytes - spoolBytes();
-                    fileState.stableSent = true;
-                    saveState();
-                } else {
-                    fileState.lastSize = attributes.size();
-                }
-                report.bytesRead += Math.min(fileState.offset, attributes.size());
+                report.lastCollectedAt = Instant.now().toString();
             }
-            report.lastCollectedAt = Instant.now().toString();
         }
+        if (files.isEmpty()) { Thread.sleep(1000); return; }
+        int withoutProgress = 0;
+        while (System.nanoTime() < deadline && withoutProgress < files.size()) {
+            boolean progress;
+            synchronized (this) {
+                ScanFile candidate = files.get(Math.floorMod(scanCursor++, files.size()));
+                progress = active(candidate.source.id) && scanFile(candidate.source, candidate.path);
+            }
+            withoutProgress = progress ? 0 : withoutProgress + 1;
+        }
+        if (withoutProgress >= files.size()) Thread.sleep(1000);
+    }
+
+    private boolean scanFile(SourceConfig source, Path file) throws Exception {
+        long available = local.spoolLimitBytes - spoolBytes();
+        if (available <= SPOOL_ENTRY_RESERVE) { reports.get(source.id).status = "BLOCKED"; return false; }
+        BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class);
+        String fileKey = fileKey(file, attributes);
+        String key = source.id + "|" + fileKey;
+        FileState fileState = state.files.get(key);
+        if (fileState == null) {
+            fileState = new FileState(); fileState.sourceId = source.id; fileState.fileKey = fileKey;
+            fileState.generation = UUID.randomUUID().toString(); fileState.path = file.toString();
+            fileState.offset = "NOW".equals(source.startMode) ? attributes.size() : 0;
+            fileState.lastSize = attributes.size(); fileState.stableSent = "NOW".equals(source.startMode);
+            state.files.put(key, fileState); saveState();
+        } else if (attributes.size() < fileState.offset) {
+            if (inFlight.contains(source.id)) return false;
+            discardStream(source.id, fileKey, fileState.generation);
+            fileState.generation = UUID.randomUUID().toString(); fileState.offset = 0; fileState.stableSent = false;
+            saveState();
+        }
+        fileState.path = file.toString();
+        long remaining = attributes.size() - fileState.offset;
+        if (remaining > 0) {
+            int length = (int) Math.min(Math.min(remaining, Math.min(local.maxBatchBytes, 4 * 1024 * 1024)), available-SPOOL_ENTRY_RESERVE);
+            byte[] bytes = read(file, fileState.offset, length);
+            if (bytes.length == 0) return false;
+            enqueue(source, fileState, attributes, bytes, false);
+            fileState.offset += bytes.length; fileState.lastSize = attributes.size(); fileState.stableSent = false;
+            readBytes += bytes.length; reports.get(source.id).bytesRead += bytes.length;
+            saveState(); return true;
+        }
+        if (!fileState.stableSent && fileState.lastSize == attributes.size()) {
+            enqueue(source, fileState, attributes, new byte[0], true);
+            fileState.stableSent = true; saveState(); return true;
+        }
+        fileState.lastSize = attributes.size(); return false;
+    }
+
+    private static final class ScanFile {
+        final SourceConfig source; final Path path;
+        ScanFile(SourceConfig source, Path path) { this.source = source; this.path = path; }
     }
 
     private SourceReport validate(SourceConfig source) {
@@ -208,6 +255,7 @@ final class AgentRuntime implements AutoCloseable {
 
     private void enqueue(SourceConfig source, FileState file, BasicFileAttributes attributes,
                          byte[] bytes, boolean stable) throws Exception {
+        try {
         BatchMetadata metadata = new BatchMetadata();
         metadata.batchId = UUID.randomUUID().toString();
         metadata.sourceId = source.id;
@@ -229,40 +277,136 @@ final class AgentRuntime implements AutoCloseable {
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING));
         try { gzip.write(bytes); } finally { gzip.close(); }
         AgentFiles.moveAtomic(payloadTemporary, payload);
-        AgentFiles.writeAtomic(spoolDirectory.resolve(base + ".json"), metadata);
+        Path metadataPath = spoolDirectory.resolve(base + ".json");
+        AgentFiles.writeAtomic(metadataPath, metadata);
+        queue.put(metadataPath, metadata);
+        cachedSpoolBytes += Files.size(metadataPath) + Files.size(payload);
+        } catch (IOException failure) { diskHealthy=false; throw failure; }
     }
 
-    private synchronized boolean uploadOne() throws Exception {
-        List<Path> batches = batchMetadataFiles();
-        if (batches.isEmpty()) return false;
-        Path metadataPath = batches.get(0);
-        BatchMetadata metadata = AgentFiles.read(metadataPath, BatchMetadata.class);
-        String base = metadataPath.getFileName().toString().replace(".json", "");
-        Path payload = spoolDirectory.resolve(base + ".gz");
+    private boolean uploadOne() throws Exception {
+        Path metadataPath = null;
+        BatchMetadata metadata = null;
+        synchronized (this) {
+            Set<Long> examined = new HashSet<Long>();
+            Map<Long, Path> candidates = new TreeMap<Long, Path>();
+            for (Map.Entry<Path, BatchMetadata> entry : queue.entrySet()) {
+                long source = entry.getValue().sourceId;
+                if (!examined.add(source)) continue;
+                if (active(source) && !inFlight.contains(source) && retryTime(source) <= System.currentTimeMillis())
+                    candidates.put(source, entry.getKey());
+            }
+            if (candidates.isEmpty()) return false;
+            for (Map.Entry<Long, Path> candidate : candidates.entrySet()) {
+                if (candidate.getKey() > lastUploadSource) { metadataPath = candidate.getValue(); break; }
+            }
+            if (metadataPath == null) metadataPath = candidates.values().iterator().next();
+            metadata = queue.get(metadataPath); lastUploadSource = metadata.sourceId; inFlight.add(metadata.sourceId);
+        }
+        Path payload = spoolDirectory.resolve(metadataPath.getFileName().toString().replace(".json", ".gz"));
         try {
-            http.upload(metadata, payload);
-            deleteBatch(metadataPath, payload);
+            AgentModels.BatchAck ack = http.upload(metadata, payload);
+            if (ack == null || !"ACK".equals(ack.status) || ack.expectedOffset != metadata.endOffset)
+                throw new IOException("Invalid upload ACK");
+            synchronized (this) {
+                deleteBatch(metadataPath, payload); failures.remove(metadata.sourceId); retryAt.remove(metadata.sourceId);
+                uploadedBytes += metadata.endOffset-metadata.startOffset;
+            }
             return true;
         } catch (UploadException exception) {
-            if (exception.status == 410) {
-                deleteBatch(metadataPath, payload);
-                return true;
+            synchronized (this) {
+                if (exception.status == 410) { deleteBatch(metadataPath, payload); return true; }
+                if (exception.status == 409 && exception.error.expectedOffset != null) {
+                    rewind(metadata, exception.error.expectedOffset.longValue()); return true;
+                }
+                scheduleRetry(metadata.sourceId, exception.retryAfterMillis);
             }
-            if (exception.status == 409 && exception.error.expectedOffset != null) {
-                rewind(metadata, exception.error.expectedOffset.longValue());
-                return true;
+            return false;
+        } catch (IOException exception) {
+            synchronized (this) { scheduleRetry(metadata.sourceId, 0); }
+            return false;
+        } finally {
+            synchronized (this) {
+                inFlight.remove(metadata.sourceId);
+                if (!active(metadata.sourceId)) {
+                    Set<Long> active = new HashSet<Long>();
+                    for (SourceConfig source : remote.sources) active.add(source.id);
+                    clearRemovedSources(active);
+                }
             }
-            throw exception;
         }
     }
 
-    private synchronized void heartbeat() throws IOException {
+    private long retryTime(long source) { Long at = retryAt.get(source); return at == null ? 0 : at; }
+    private void scheduleRetry(long source, long serverDelay) {
+        int count = failures.containsKey(source) ? failures.get(source)+1 : 1;
+        failures.put(source, count);
+        long base = Math.min(30000, 1000L << Math.min(count-1, 5));
+        long delay = Math.max(serverDelay, Math.min(30000, base + ThreadLocalRandom.current().nextLong(base/4+1)));
+        retryAt.put(source, System.currentTimeMillis()+delay); retries++;
+    }
+    private boolean active(long sourceId) {
+        for (SourceConfig source : remote.sources) if (source.id == sourceId) return true;
+        return false;
+    }
+
+    private void heartbeat() throws IOException {
         Heartbeat heartbeat = new Heartbeat();
-        heartbeat.displayAddress = local.displayAddress == null ? AgentMain.detectAddress() : local.displayAddress;
-        heartbeat.spoolBytes = spoolBytes();
-        heartbeat.spoolLimitBytes = local.spoolLimitBytes;
-        heartbeat.sources.addAll(reports.values());
-        http.heartbeat(heartbeat);
+        synchronized (this) {
+            heartbeat.displayAddress = local.displayAddress == null ? AgentMain.detectAddress() : local.displayAddress;
+            heartbeat.spoolBytes = cachedSpoolBytes; heartbeat.spoolLimitBytes = local.spoolLimitBytes;
+            // Copy mutable reports before releasing the state lock.
+            for (SourceReport report : reports.values()) {
+                heartbeat.sources.add(AgentFiles.JSON.readValue(AgentFiles.JSON.writeValueAsBytes(report), SourceReport.class));
+            }
+        }
+        long started = System.nanoTime();
+        try { http.heartbeat(heartbeat); }
+        finally { synchronized (this) { heartbeatNanos += System.nanoTime()-started; heartbeatCount++; } }
+    }
+
+    private synchronized void reportMetrics() throws IOException {
+        try { rebuildQueue(); diskHealthy = true; }
+        catch (IOException exception) { diskHealthy = false; throw exception; }
+        Map<String, Object> values = new java.util.LinkedHashMap<String, Object>();
+        values.put("type", "agent_metrics"); values.put("readBytes", readBytes); values.put("uploadedBytes", uploadedBytes);
+        long now = System.nanoTime();
+        double seconds = Math.max(0.001, (now-previousReportNanos)/1e9);
+        values.put("readBytesPerSecond", (readBytes-previousReadBytes)/seconds);
+        values.put("uploadBytesPerSecond", (uploadedBytes-previousUploadedBytes)/seconds);
+        previousReadBytes=readBytes; previousUploadedBytes=uploadedBytes; previousReportNanos=now;
+        values.put("spoolBytes", cachedSpoolBytes); values.put("retryCount", retries); values.put("inFlight", inFlight.size());
+        long oldest = System.currentTimeMillis();
+        for (BatchMetadata entry : queue.values()) oldest = Math.min(oldest, entry.createdAt);
+        values.put("oldestBatchMillis", Math.max(0, System.currentTimeMillis()-oldest));
+        values.put("heartbeatNanos", heartbeatNanos); values.put("heartbeatCount", heartbeatCount);
+        System.out.println(AgentFiles.JSON.writeValueAsString(values));
+    }
+
+    private void rebuildQueue() throws IOException {
+        TreeMap<Path, BatchMetadata> rebuilt = new TreeMap<Path, BatchMetadata>();
+        long bytes = 0;
+        DirectoryStream<Path> stream = Files.newDirectoryStream(spoolDirectory);
+        try {
+            for (Path path : stream) {
+                if (!Files.isRegularFile(path)) continue;
+                bytes += Files.size(path);
+                if (path.getFileName().toString().endsWith(".json")) {
+                    Path payload = spoolDirectory.resolve(path.getFileName().toString().replace(".json", ".gz"));
+                    if (!Files.isRegularFile(payload)) throw new IOException("Queued batch payload missing");
+                    rebuilt.put(path, AgentFiles.read(path, BatchMetadata.class));
+                }
+            }
+        } finally { stream.close(); }
+        queue.clear(); queue.putAll(rebuilt); cachedSpoolBytes = bytes;
+    }
+
+    private void discardStream(long source, String fileKey, String generation) throws IOException {
+        for (Path path : new ArrayList<Path>(queue.keySet())) {
+            BatchMetadata entry = queue.get(path);
+            if (entry.sourceId == source && fileKey.equals(entry.fileKey) && generation.equals(entry.generation))
+                deleteBatch(path, spoolDirectory.resolve(path.getFileName().toString().replace(".json", ".gz")));
+        }
     }
 
     private void rewind(BatchMetadata failed, long expected) throws IOException {
@@ -273,8 +417,8 @@ final class AgentRuntime implements AutoCloseable {
             file.stableSent = false;
             saveState();
         }
-        for (Path path : batchMetadataFiles()) {
-            BatchMetadata metadata = AgentFiles.read(path, BatchMetadata.class);
+        for (Path path : new ArrayList<Path>(queue.keySet())) {
+            BatchMetadata metadata = queue.get(path);
             if (metadata.sourceId == failed.sourceId && failed.fileKey.equals(metadata.fileKey)
                     && failed.generation.equals(metadata.generation)) {
                 deleteBatch(path, spoolDirectory.resolve(path.getFileName().toString().replace(".json", ".gz")));
@@ -315,12 +459,12 @@ final class AgentRuntime implements AutoCloseable {
         reports.keySet().retainAll(active);
         List<String> removeKeys = new ArrayList<String>();
         for (Map.Entry<String, FileState> entry : state.files.entrySet()) {
-            if (!active.contains(entry.getValue().sourceId)) removeKeys.add(entry.getKey());
+            if (!active.contains(entry.getValue().sourceId) && !inFlight.contains(entry.getValue().sourceId)) removeKeys.add(entry.getKey());
         }
         for (String key : removeKeys) state.files.remove(key);
-        for (Path path : batchMetadataFiles()) {
-            BatchMetadata metadata = AgentFiles.read(path, BatchMetadata.class);
-            if (!active.contains(metadata.sourceId)) {
+        for (Path path : new ArrayList<Path>(queue.keySet())) {
+            BatchMetadata metadata = queue.get(path);
+            if (!active.contains(metadata.sourceId) && !inFlight.contains(metadata.sourceId)) {
                 deleteBatch(path, spoolDirectory.resolve(path.getFileName().toString().replace(".json", ".gz")));
             }
         }
@@ -335,14 +479,9 @@ final class AgentRuntime implements AutoCloseable {
         return result;
     }
 
-    private long spoolBytes() {
-        try {
-            long total = 0;
-            DirectoryStream<Path> stream = Files.newDirectoryStream(spoolDirectory);
-            try { for (Path path : stream) if (Files.isRegularFile(path)) total += Files.size(path); }
-            finally { stream.close(); }
-            return total;
-        } catch (IOException exception) { return 0; }
+    private long spoolBytes() throws IOException {
+        if (!diskHealthy) throw new IOException("Spool accounting unavailable; reads stopped");
+        return cachedSpoolBytes;
     }
 
     private void removeOrphanPayloads() throws IOException {
@@ -386,24 +525,32 @@ final class AgentRuntime implements AutoCloseable {
     }
 
     private void deleteBatch(Path metadata, Path payload) throws IOException {
-        Files.deleteIfExists(metadata);
-        Files.deleteIfExists(payload);
+        long bytes = (Files.exists(metadata) ? Files.size(metadata) : 0) + (Files.exists(payload) ? Files.size(payload) : 0);
+        try {
+            Files.deleteIfExists(metadata); Files.deleteIfExists(payload);
+            queue.remove(metadata); cachedSpoolBytes = Math.max(0, cachedSpoolBytes-bytes);
+        } catch (IOException exception) { diskHealthy = false; throw exception; }
     }
 
-    private void saveState() throws IOException { AgentFiles.writeAtomic(statePath, state); }
+    private void saveState() throws IOException {
+        try { AgentFiles.writeAtomic(statePath, state); }
+        catch (IOException failure) { diskHealthy=false; throw failure; }
+    }
 
     private Runnable guard(final String taskName, final Task task) {
         return new Runnable() {
             public void run() {
                 try { task.run(); }
-                catch (Throwable exception) { System.err.println(Instant.now() + " " + taskName + " failed: " + exception.getMessage()); }
+                catch (Throwable exception) { System.err.println(Instant.now() + " " + taskName + " failed: " + exception.getClass().getSimpleName()); }
             }
         };
     }
 
     public void close() {
-        executor.shutdown();
-        try { executor.awaitTermination(10, TimeUnit.SECONDS); }
+        closed = true;
+        uploadExecutor.shutdownNow();
+        executor.shutdownNow();
+        try { executor.awaitTermination(10, TimeUnit.SECONDS); uploadExecutor.awaitTermination(35, TimeUnit.SECONDS); }
         catch (InterruptedException exception) { Thread.currentThread().interrupt(); }
     }
 
