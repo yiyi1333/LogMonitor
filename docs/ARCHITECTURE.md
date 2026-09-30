@@ -544,15 +544,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 `v1.0.3` 的异常恢复修复不改变 API 字段和数据库结构。升级时先部署后端和前端，再升级 Agent：后端兼容现有 `v1.0.0` Agent，忽略它持续上报的已删除来源报告；新版 Agent 进一步在配置更新时清理内存旧报告。已存储的服务器旧异常会在下一次成功心跳汇总时修正，无须手工修改数据库。
 
 ```bash
-tar -xzf logmonitor-backend-1.0.9.tar.gz
-sudo ./logmonitor-backend-1.0.9/install.sh
+tar -xzf logmonitor-backend-1.1.0.tar.gz
+sudo ./logmonitor-backend-1.1.0/install.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.0.9.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.9/install.sh
+tar -xzf logmonitor-frontend-1.1.0.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.1.0/install.sh
 
-tar -xzf logmonitor-agent-1.0.9.tar.gz
-sudo ./logmonitor-agent-1.0.9/install.sh
+tar -xzf logmonitor-agent-1.1.0.tar.gz
+sudo ./logmonitor-agent-1.1.0/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -597,7 +597,7 @@ sudo ./logmonitor-agent-1.0.9/install.sh
 
 ### 13.1 版本约定
 
-最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.9`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.1.0`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
 
 - 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
 - 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.3` -> `v1.1.0`。
@@ -691,3 +691,5 @@ sudo bash deploy/rabbitmq/install.sh --management /opt/rabbitmq-packages
 文件目录清单在锁外发现，每 10 秒更新，既有文件连续读取；来源变更和每分钟校准会重建清单。上传连接设置 45 秒总截止时间，超时断开连接并保留原批次重试，避免只设置单次 socket 超时导致在途任务长期阻塞。原 ACK 状态和结束偏移都匹配后才删除磁盘批次。
 
 原生 MySQL V14 回归通过 `MYSQL_IT_URL`、`MYSQL_IT_USER`、`MYSQL_IT_PASSWORD` 和 `MYSQL_IT_ISOLATED=true` 启用，覆盖大批次分块、并发错误组累加、整批回滚、历史首次时间及 AI/明细分批保留清理；默认 H2 回归仍可单独运行。隔离环境验收和回退步骤见 [第一阶段验收手册](performance/PHASE1.md)，实测范围见 [本地验证报告](performance/RESULTS.md)。
+
+2026-09-30 按用户指定将当前源码和三组件安装包版本同步为 `v1.1.0`，使用现有发布脚本执行测试、干净构建及 SHA-256 校验。此次仅生成安装包，不执行生产部署或正式发布，正式发布记录仍为 `v1.0.0`；历史性能报告保持当时实测版本。
