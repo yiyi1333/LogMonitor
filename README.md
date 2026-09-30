@@ -1,6 +1,6 @@
 # LogMonitor
 
-![Version](https://img.shields.io/badge/version-v1.0.4-1f6feb)
+![Version](https://img.shields.io/badge/version-v1.0.1-1f6feb)
 ![License](https://img.shields.io/badge/license-MIT-2ea44f)
 ![Backend](https://img.shields.io/badge/backend-Spring%20Boot%203%20%2F%20JDK%2017-6db33f)
 ![Frontend](https://img.shields.io/badge/frontend-Vue%203%20%2F%20TypeScript-42b883)
@@ -9,9 +9,7 @@
 
 LogMonitor is an operations-focused log analytics platform. It continuously ingests Spring Boot text logs from local directories or remote servers, recognizes requests and multi-line failures, aggregates trends by application namespace, and optionally sends redacted context to multiple LLM providers for analysis.
 
-当前版本 / Current version: **v1.0.4**
-
-最新正式发布 / Latest formal release: **v1.0.0**
+当前版本 / Current version: **v1.0.1**
 
 ## 语言 / Languages
 
@@ -159,9 +157,9 @@ cd ../agent && export JAVA_HOME=/path/to/jdk-8 && ./deploy/release.sh
 当前版本产物示例 / Current artifact names:
 
 ```text
-release/logmonitor-frontend-1.0.4.tar.gz
-release/logmonitor-backend-1.0.4.tar.gz
-release/logmonitor-agent-1.0.4.tar.gz
+release/logmonitor-frontend-1.0.1.tar.gz
+release/logmonitor-backend-1.0.1.tar.gz
+release/logmonitor-agent-1.0.1.tar.gz
 ```
 
 安装脚本默认将后端以 nohup 运行在 `/opt/logmonitor/backend`，前端由 Nginx 提供并监听 `127.0.0.1:8081`，Agent 使用 `/opt/logmonitor-agent` 和 `/var/lib/logmonitor-agent`。生产入口必须由 TLS 反向代理保护并保持页面与 `/api` 同源。
@@ -222,18 +220,6 @@ mvn test
 ```
 
 后端测试覆盖采集、解析、去重、错误分类、命名空间、Agent、LLM 配置和脱敏；前端测试覆盖路由、筛选器、国际化、主题、空数据和设置页；Agent 测试覆盖文件读取、预检和队列行为。
-
-## 版本策略 / Versioning
-
-三组件版本必须保持一致：`backend/pom.xml`、`agent/pom.xml`、`frontend/package.json` 和锁文件同时更新。
-
-| 场景 / Change type | 规则 / Rule | 示例 / Example |
-| --- | --- | --- |
-| 普通提交（含文档与约定） / Ordinary commit | patch `+0.0.1` | `1.0.0` -> `1.0.1` |
-| 正式发布 / Formal release | minor `+0.1.0`，patch 归零 | `1.0.1` -> `1.1.0` |
-| 用户明确指定大版本发布 / Explicitly requested major release | major `+1`，minor 和 patch 归零 | `1.x.y` -> `2.0.0` |
-
-最新正式发布与当前源码版本分别记录，只有完成正式发布才更新发布记录。发布提交只执行对应的发布递增，不再叠加 patch；仅构建发布包不视为正式发布。即使存在不兼容变更，也必须由用户明确说“大版本发布”才能递增 major。
 
 发布脚本的 `--version` 只用于断言源码版本，不能覆盖版本号。版本变更后同步更新发布示例、Agent 运行时版本和受影响测试 fixture。
 
