@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "LogMonitor 系统架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1300,
+      600
+    ]
+  },
+  "components": [
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "运维用户",
+      "sublabel": "浏览器 · 图表与错误分析",
+      "pos": [
+        50,
+        240
+      ],
+      "size": [
+        200,
+        88
+      ]
+    },
+    {
+      "id": "web-entry",
+      "type": "frontend",
+      "label": "Web 入口",
+      "sublabel": "Nginx · Vue 3 SPA",
+      "pos": [
+        380,
+        240
+      ],
+      "size": [
+        200,
+        88
+      ]
+    },
+    {
+      "id": "center-api",
+      "type": "backend",
+      "label": "LogMonitor 中心端",
+      "sublabel": "Spring Boot 3 · JDK 17",
+      "tag": "解析 · 脱敏 · 聚合 · 查询",
+      "pos": [
+        710,
+        240
+      ],
+      "size": [
+        200,
+        88
+      ]
+    },
+    {
+      "id": "mysql-store",
+      "type": "database",
+      "label": "MySQL 8",
+      "sublabel": "访问聚合 · 错误明细 · 配置",
+      "pos": [
+        1040,
+        240
+      ],
+      "size": [
+        200,
+        88
+      ]
+    },
+    {
+      "id": "center-logs",
+      "type": "external",
+      "label": "中心本机日志",
+      "sublabel": "允许根目录 · 只读采集",
+      "pos": [
+        710,
+        60
+      ],
+      "size": [
+        200,
+        88
+      ]
+    },
+    {
+      "id": "analysis-provider",
+      "type": "cloud",
+      "label": "LLM 服务",
+      "sublabel": "OpenAI 兼容 / Anthropic / Gemini",
+      "pos": [
+        1040,
+        60
+      ],
+      "size": [
+        200,
+        88
+      ]
+    },
+    {
+      "id": "remote-logs",
+      "type": "external",
+      "label": "业务服务器日志",
+      "sublabel": "文件发现 · 轮转与增量读取",
+      "pos": [
+        50,
+        430
+      ],
+      "size": [
+        200,
+        88
+      ]
+    },
+    {
+      "id": "remote-agent",
+      "type": "backend",
+      "label": "LogMonitor Agent",
+      "sublabel": "JDK 8 · 扫描与上传独立调度",
+      "tag": "原子磁盘队列 · 默认 5 GB",
+      "pos": [
+        380,
+        430
+      ],
+      "size": [
+        200,
+        88
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "单实例中心 · Linux / Docker",
+      "wraps": [
+        "web-entry",
+        "center-api",
+        "center-logs"
+      ],
+      "pad": 30
+    },
+    {
+      "kind": "region",
+      "label": "远程采集节点 · 可扩展多个 Agent",
+      "wraps": [
+        "remote-logs",
+        "remote-agent"
+      ],
+      "pad": 30
+    }
+  ],
+  "connections": [
+    {
+      "id": "operator-web",
+      "from": "operator",
+      "to": "web-entry",
+      "label": "HTTPS / Session",
+      "variant": "emphasis"
+    },
+    {
+      "id": "web-api",
+      "from": "web-entry",
+      "to": "center-api",
+      "label": "/api 同源代理",
+      "variant": "emphasis"
+    },
+    {
+      "id": "center-sql",
+      "from": "center-api",
+      "to": "mysql-store",
+      "label": "MyBatis / SQL",
+      "variant": "emphasis",
+      "labelDy": 24
+    },
+    {
+      "id": "local-ingest",
+      "from": "center-logs",
+      "to": "center-api",
+      "label": "本地增量采集",
+      "labelDy": 24
+    },
+    {
+      "id": "redacted-analysis",
+      "from": "center-api",
+      "to": "analysis-provider",
+      "label": "按需发送脱敏上下文",
+      "variant": "dashed"
+    },
+    {
+      "id": "agent-read",
+      "from": "remote-logs",
+      "to": "remote-agent",
+      "label": "读取并可靠排队"
+    },
+    {
+      "id": "remote-ingest",
+      "from": "remote-agent",
+      "to": "center-api",
+      "label": "HTTPS / Bearer / gzip",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "可靠采集",
+      "items": [
+        "按来源顺序上传，事务提交后 ACK",
+        "ACK 后立即可查，重试保持幂等"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "管理与分析",
+      "items": [
+        "Session / 权限保护查询和来源管理",
+        "Agent 心跳、配置、目录长轮询独立运行"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "存储与部署",
+      "items": [
+        "MySQL 保留 180 天；本地演示使用 H2",
+        "传统安装包或 Docker；不归档原始日志"
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-# Docker 部署（源码 1.1.4）
+# Docker 部署（源码 1.1.5）
 
 需要 Docker Engine 与 Compose v2（支持 `bind.create_host_path`）；构建机实测 Engine 28.3.0 / Compose 2.38.2。发布包包含 backend、frontend、agent 镜像和可选 MySQL 8.4 镜像，可在无镜像仓库连接的主机导入。`PLATFORM` 文件表示架构，默认打包 Linux amd64，构建时 `PLATFORM=linux/arm64` 可生成 arm64 包。只导入与主机架构匹配的包。
 
@@ -78,4 +78,4 @@ export AGENT_JAVA_HOME=/path/to/jdk-8
 ./deploy/release-all.sh
 ```
 
-默认得到三种 Linux 安装包及 `logmonitor-docker-1.1.4-linux-amd64.tar.gz` 和四份 SHA-256。Docker 包由已校验的三个安装包生成；不读取本机运行配置或 .env。基础镜像实际 ID/digest 与架构记录在 IMAGES.txt。各镜像可在包目录用 Dockerfile 重新构建，构建上下文通过白名单排除运行密钥、数据库和队列；部署配置仅使用应用版本号，不意味着正式发布（正式记录仍为 v1.0.0）。
+默认得到三种 Linux 安装包及 `logmonitor-docker-1.1.5-linux-amd64.tar.gz` 和四份 SHA-256。Docker 包由已校验的三个安装包生成；不读取本机运行配置或 .env。基础镜像实际 ID/digest 与架构记录在 IMAGES.txt。各镜像可在包目录用 Dockerfile 重新构建，构建上下文通过白名单排除运行密钥、数据库和队列；部署配置仅使用应用版本号，不意味着正式发布（正式记录仍为 v1.0.0）。

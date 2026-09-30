@@ -148,6 +148,10 @@ LogMonitor 是面向内部运维人员的单中心日志分析平台，当前能
 
 ## 2. 总体架构
 
+![LogMonitor 系统架构图](diagrams/logmonitor.png)
+
+README 与本节共用由 Archify 图源生成的静态架构图，涵盖单实例中心、本机采集、远程 Agent、MySQL 与脱敏 LLM 调用。交互 HTML 支持浅色/深色、节点聚焦及导出，可下载后在浏览器打开。维护时先核对 AgentRuntime、AgentProtocolController、AgentIngestService、LogCollectorService、SecurityConfig 与 Docker/Nginx 配置，再修改图源、验证并重新导出；不得直接编辑生成的 HTML/SVG。图源、交互文件及验证记录见 [架构图说明](diagrams/README.md)。图中 HTTPS 表示生产 TLS 入口，Compose 内部 API 使用受控内网 HTTP；本地演示仍可使用 H2。
+
 ```mermaid
 flowchart LR
     Operator["运维用户浏览器"] -->|HTTPS / Session| Web["Vue 3 SPA"]
@@ -544,15 +548,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 `v1.0.3` 的异常恢复修复不改变 API 字段和数据库结构。升级时先部署后端和前端，再升级 Agent：后端兼容现有 `v1.0.0` Agent，忽略它持续上报的已删除来源报告；新版 Agent 进一步在配置更新时清理内存旧报告。已存储的服务器旧异常会在下一次成功心跳汇总时修正，无须手工修改数据库。
 
 ```bash
-tar -xzf logmonitor-backend-1.1.4.tar.gz
-sudo sh ./logmonitor-backend-1.1.4/start.sh
+tar -xzf logmonitor-backend-1.1.5.tar.gz
+sudo sh ./logmonitor-backend-1.1.5/start.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.1.4.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.1.4/install.sh
+tar -xzf logmonitor-frontend-1.1.5.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.1.5/install.sh
 
-tar -xzf logmonitor-agent-1.1.4.tar.gz
-sudo ./logmonitor-agent-1.1.4/install.sh
+tar -xzf logmonitor-agent-1.1.5.tar.gz
+sudo ./logmonitor-agent-1.1.5/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -597,7 +601,7 @@ sudo ./logmonitor-agent-1.1.4/install.sh
 
 ### 13.1 版本约定
 
-最新正式发布为 `v1.0.0`，当前源码版本为 `v1.1.4`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.1.5`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
 
 - 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
 - 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.3` -> `v1.1.0`。

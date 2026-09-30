@@ -1,6 +1,6 @@
 # LogMonitor
 
-![Version](https://img.shields.io/badge/version-v1.1.4-1f6feb)
+![Version](https://img.shields.io/badge/version-v1.1.5-1f6feb)
 ![License](https://img.shields.io/badge/license-MIT-2ea44f)
 ![Backend](https://img.shields.io/badge/backend-Spring%20Boot%203%20%2F%20JDK%2017-6db33f)
 ![Frontend](https://img.shields.io/badge/frontend-Vue%203%20%2F%20TypeScript-42b883)
@@ -9,9 +9,9 @@
 
 LogMonitor is an operations-focused log analytics platform. It continuously ingests Spring Boot text logs from local directories or remote servers, recognizes requests and multi-line failures, aggregates trends by application namespace, and optionally sends redacted context to multiple LLM providers for analysis.
 
-当前版本 / Current version: **v1.1.4**
+当前版本 / Current version: **v1.1.5**
 
-采集目录支持中心本机与新版 Agent 的实时逐层下拉浏览，同时保留手动输入；远程节点需升级 Agent 至 1.1.4。
+采集目录支持中心本机与新版 Agent 的实时逐层下拉浏览，同时保留手动输入；远程节点需使用支持目录浏览的新版 Agent。
 
 ## 语言 / Languages
 
@@ -45,22 +45,13 @@ The current release does not include alerting, incident ownership workflows, raw
 
 ## 架构 / Architecture
 
-以下 Mermaid 图和 [服务架构说明](docs/ARCHITECTURE.md) 是精确的实现基线。图中 Agent 只负责文件发现、增量读取、可靠排队和上传，解析、脱敏、分类和存储统一在中心端完成。
+![LogMonitor 系统架构图](docs/diagrams/logmonitor.png)
 
-The Mermaid diagram and [architecture reference](docs/ARCHITECTURE.md) are the implementation source of truth. Agents discover files, read incrementally, queue batches, and upload them; parsing, redaction, classification, and storage stay centralized.
+中心端统一完成解析、脱敏、分类、聚合与查询；Agent 负责文件发现、增量读取、可靠排队和上传。上传批次在事务提交后返回 ACK，配置、心跳和目录浏览独立调度。
 
-```mermaid
-flowchart LR
-    Browser["Operator browser"] -->|HTTPS / Session| SPA["Vue 3 SPA"]
-    SPA -->|/api| Center["Spring Boot center\nJDK 17"]
-    Local["Local log directories"] --> Collector["Collector + parser"]
-    Collector --> Center
-    Remote["Remote Spring Boot logs"] --> Agent["LogMonitor Agent\nJDK 8"]
-    Agent --> Spool["Atomic disk spool\n5 GB limit"]
-    Spool -->|HTTPS / gzip batches| Center
-    Center --> DB[("MySQL 8\nH2 for local demo")]
-    Center -->|Redacted context| LLM["LLM providers\nOpenAI / Anthropic / Gemini"]
-```
+The center handles parsing, redaction, classification, aggregation and queries. Agents discover files, read incrementally, queue batches and upload them; ACK follows transaction commit.
+
+[交互图（下载 HTML 后用浏览器打开）](docs/diagrams/logmonitor.html) · [SVG 矢量图](docs/diagrams/logmonitor.svg) · [图源及验证说明](docs/diagrams/README.md) · [服务架构说明](docs/ARCHITECTURE.md)
 
 ### 模块 / Modules
 
@@ -159,9 +150,9 @@ cd ../agent && export JAVA_HOME=/path/to/jdk-8 && ./deploy/release.sh
 当前版本产物示例 / Current artifact names:
 
 ```text
-release/logmonitor-frontend-1.1.4.tar.gz
-release/logmonitor-backend-1.1.4.tar.gz
-release/logmonitor-agent-1.1.4.tar.gz
+release/logmonitor-frontend-1.1.5.tar.gz
+release/logmonitor-backend-1.1.5.tar.gz
+release/logmonitor-agent-1.1.5.tar.gz
 ```
 
 安装脚本默认将后端以 nohup 运行在 `/opt/logmonitor/backend`，前端由 Nginx 提供并监听 `127.0.0.1:8081`，Agent 使用 `/opt/logmonitor-agent` 和 `/var/lib/logmonitor-agent`。生产入口必须由 TLS 反向代理保护并保持页面与 `/api` 同源。
