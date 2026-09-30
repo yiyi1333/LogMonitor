@@ -39,26 +39,27 @@ class ErrorOccurrenceIntegrationTest extends IntegrationTestSupport {
     @Test
     void queriesStableStreamUpdatesDetailAndOccurrenceAnalysisSchema() throws Exception {
         MockHttpSession session = login();
+        String service = "stream-only-" + java.util.UUID.randomUUID();
         mvc.perform(get("/api/errors/occurrences").session(session))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("ERROR_SERVICE_REQUIRED"));
         mvc.perform(get("/api/errors/occurrences").session(session)
-                        .param("service", "stream-only-service").param("sort", "sideways"))
+                        .param("service", service).param("sort", "sideways"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("ERROR_SORT_INVALID"));
 
         Instant occurredAt = Instant.now().minus(10, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.MILLIS);
-        long systemGroup = insertGroup("stream-only-service", "SYSTEM", "Database unavailable", "SQLException");
-        long businessGroup = insertGroup("stream-only-service", "BUSINESS", "Session expired", "LoginException");
+        long systemGroup = insertGroup(service, "SYSTEM", "Database unavailable", "SQLException");
+        long businessGroup = insertGroup(service, "BUSINESS", "Session expired", "LoginException");
         long firstId = insertOccurrence(systemGroup, occurredAt, "worker-1", "connection refused", "stack-one", "event-first");
         long secondId = insertOccurrence(businessGroup, occurredAt, "worker-2", "user session expired", "stack-two", "event-second");
 
         mvc.perform(get("/api/services").session(session))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$", org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem(service))));
 
         MvcResult descending = mvc.perform(get("/api/errors/occurrences").session(session)
-                        .param("service", "stream-only-service")
+                        .param("service", service)
                         .param("from", occurredAt.minusSeconds(60).toString())
                         .param("to", occurredAt.plusSeconds(60).toString()))
                 .andExpect(status().isOk())
@@ -71,7 +72,7 @@ class ErrorOccurrenceIntegrationTest extends IntegrationTestSupport {
         long snapshotId = json.readTree(descending.getResponse().getContentAsString()).path("snapshotId").asLong();
 
         mvc.perform(get("/api/errors/occurrences").session(session)
-                        .param("service", "stream-only-service")
+                        .param("service", service)
                         .param("from", occurredAt.minusSeconds(60).toString())
                         .param("to", occurredAt.plusSeconds(60).toString())
                         .param("sort", "ASC").param("category", "SYSTEM").param("keyword", "connection"))
@@ -90,7 +91,7 @@ class ErrorOccurrenceIntegrationTest extends IntegrationTestSupport {
 
         long thirdId = insertOccurrence(systemGroup, occurredAt.plusSeconds(1), "worker-3", "late event", "stack-three", "event-third");
         mvc.perform(get("/api/errors/occurrences/updates").session(session)
-                        .param("service", "stream-only-service")
+                        .param("service", service)
                         .param("from", occurredAt.minusSeconds(60).toString())
                         .param("to", occurredAt.plusSeconds(60).toString())
                         .param("afterId", String.valueOf(snapshotId)))
@@ -113,10 +114,11 @@ class ErrorOccurrenceIntegrationTest extends IntegrationTestSupport {
 
     @Test
     void groupFirstSeenIsHistoricalWhileCountsAndLastSeenRemainFiltered() throws Exception {
+        String service = "historical-first-" + java.util.UUID.randomUUID();
         Instant historical = Instant.parse("2026-01-01T01:00:00Z");
         Instant first = Instant.parse("2026-09-29T01:00:00Z");
         Instant last = first.plusSeconds(60);
-        long group = insertGroup("historical-first-service", "SYSTEM", "Historical error", "SQLException");
+        long group = insertGroup(service, "SYSTEM", "Historical error", "SQLException");
         insertOccurrence(group, historical, "worker", "old", "stack", "historical");
         long firstId = insertOccurrence(group, first, "worker", "first", "stack", "first");
         long lastId = insertOccurrence(group, last, "worker", "last", "stack", "last");
@@ -128,7 +130,7 @@ class ErrorOccurrenceIntegrationTest extends IntegrationTestSupport {
         Instant from = first.minusSeconds(1);
         Instant to = last.plusSeconds(1);
         MockHttpSession session = login();
-        mvc.perform(get("/api/errors/groups").session(session).param("service", "historical-first-service")
+        mvc.perform(get("/api/errors/groups").session(session).param("service", service)
                         .param("from", from.toString()).param("to", to.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(1))
@@ -136,7 +138,7 @@ class ErrorOccurrenceIntegrationTest extends IntegrationTestSupport {
                 .andExpect(jsonPath("$.items[0].lastSeen").value(last.toString()))
                 .andExpect(jsonPath("$.items[0].occurrenceCount").value(2));
         for (String instance : new String[]{"instance-a", "instance-b"}) {
-            var rows = mapper.errorGroups(from, to, "historical-first-service", instance, null,
+            var rows = mapper.errorGroups(from, to, service, instance, null,
                     null, null, null, 20, 0);
             assertThat(rows).hasSize(1);
             assertThat(rows.get(0).firstSeen()).isEqualTo(historical);

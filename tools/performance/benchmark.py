@@ -77,6 +77,7 @@ def run(args):
     client.login()
     namespace = 'bench-' + uuid.uuid4().hex[:12]
     agents, sources, handles, processes = [], [], [], []
+    launches = []
     rng = random.Random(args.seed)
     expected = {'accesses': 0, 'errors': 0, 'bytes': 0, 'groups': {}}
     metrics = {'query_seconds': [], 'query_failures': 0, 'visibility_seconds': [], 'check_failures': 0, 'queue': [], 'producer_lag_seconds': []}
@@ -104,13 +105,44 @@ def run(args):
                     'path': str(directory), 'include': '*.log', 'charset': 'UTF-8', 'startMode': 'HISTORY_180D'})
                 sources.append((file, source['id']))
             log = open(home/'agent.log', 'wb'); handles.append(log)
-            processes.append(subprocess.Popen([args.agent_java, '-jar', str(pathlib.Path(args.agent_jar).resolve()),
-                'run', '--config', str(config_path), '--data', str(home/'data')], stdout=log, stderr=log, env=dict(os.environ, AGENT_UPLOAD_WORKERS=str(args.upload_workers))))
+            launches.append((config_path,home,log))
             agents.append(home)
+        if args.history_seed_mb:
+            seed_rng = random.Random(args.seed)
+            total = 0; sequence = 0
+            seed_files = [open(file, 'ab', buffering=0) for file, _ in sources]
+            try:
+                while total < args.history_seed_mb*1024*1024:
+                    timestamp = started-dt.timedelta(seconds=seed_rng.uniform(60, min(args.history_days-.01,178.99)*86400))
+                    timestamp = timestamp.replace(microsecond=(timestamp.microsecond//1000)*1000)
+                    local = timestamp.astimezone(dt.timezone(dt.timedelta(hours=8)))
+                    header = local.strftime('%Y-%m-%d %H:%M:%S.')+('%03d' % (local.microsecond//1000))
+                    name = 'Bench'+str(sequence % args.fingerprints)+'Exception'
+                    if seed_rng.random() < args.error_ratio:
+                        text = header+' ERROR 1 --- [seed-'+str(sequence)+'] bench.Logger : failure\nbench.'+name+': synthetic failure\n'
+                        text += '\tat bench.Work.run(Work.java:42)\n'*args.stack_lines
+                        expected['errors'] += 1
+                        group = expected['groups'].setdefault(name, {'count':0,'first':timestamp.isoformat(),'last':timestamp.isoformat()})
+                        group['count']+=1
+                        group['first']=min(group['first'],timestamp.isoformat()); group['last']=max(group['last'],timestamp.isoformat())
+                    else:
+                        text=header+' INFO 1 --- [seed-'+str(sequence)+'] bench.OncePerRequest : 当前请求URL:http://localhost/bench/u'+str(sequence % args.uris)+'\n'
+                        expected['accesses']+=1
+                    raw=text.encode();seed_files[sequence % len(seed_files)].write(raw)
+                    total+=len(raw);sequence+=1
+                expected['bytes']+=total
+                for file in seed_files:
+                    file.write((started.astimezone(dt.timezone(dt.timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S.000')+' INFO 1 --- [flush-seed] bench.Marker : flush\n').encode())
+            finally:
+                for file in seed_files:file.close()
+        for config_path,home,log in launches:
+            processes.append(subprocess.Popen([args.agent_java,'-jar',str(pathlib.Path(args.agent_jar).resolve()),
+                'run','--config',str(config_path),'--data',str(home/'data')], stdout=log,stderr=log,
+                env=dict(os.environ,AGENT_UPLOAD_WORKERS=str(args.upload_workers))))
         time.sleep(args.warmup)
         if any(p.poll() is not None for p in processes):
             raise RuntimeError('Agent exited during startup; inspect restricted local Agent logs')
-        query_from = started.replace(second=0, microsecond=0).isoformat()
+        query_from = (started-dt.timedelta(days=min(args.history_days,179)) if args.history_seed_mb else started).replace(second=0, microsecond=0).isoformat()
         def query_worker():
             reader = Client(args.url); reader.login(); turn = 0
             while not stop.is_set():
@@ -162,6 +194,7 @@ def run(args):
                     payloads = [bytearray() for _ in files]; emitted = 0; probe_uri = None
                     while emitted < target:
                         timestamp = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
+                        timestamp = timestamp.replace(microsecond=(timestamp.microsecond//1000)*1000)
                         header = timestamp.strftime('%Y-%m-%d %H:%M:%S.')+('%03d' % (timestamp.microsecond//1000))
                         is_error = rng.random() < args.error_ratio
                         fingerprint_name = 'Bench'+str(sequence % args.fingerprints)+'Exception'
@@ -172,8 +205,8 @@ def run(args):
                             text = header+' ERROR 1 --- [e-'+str(sequence)+'] bench.Logger : failure\nbench.'+fingerprint_name+': synthetic failure\n'
                             text += '\tat bench.Work.run(Work.java:42)\n'*args.stack_lines
                             expected['errors'] += 1
-                            group = expected['groups'].setdefault(fingerprint_name, {'count': 0, 'first': timestamp.isoformat(), 'last': None})
-                            group['count'] += 1; group['last'] = timestamp.isoformat()
+                            group = expected['groups'].setdefault(fingerprint_name, {'count': 0, 'first': timestamp.astimezone(dt.timezone.utc).isoformat(), 'last': None})
+                            group['count'] += 1; group['last'] = timestamp.astimezone(dt.timezone.utc).isoformat()
                         else:
                             text = header+' INFO 1 --- [r-'+str(sequence)+'] bench.OncePerRequest : 当前请求URL:http://localhost'+uri+'\n'
                             expected['accesses'] += 1
@@ -206,6 +239,23 @@ def run(args):
                     time.sleep(1)
                 metrics['actual'] = summary
                 metrics['counts_match'] = bool(summary and summary['totalAccess'] == expected['accesses'] and summary['systemErrors'] == expected['errors'])
+                actual_groups = {}; page = 1
+                while True:
+                    params = urllib.parse.urlencode({'applicationNamespace':namespace,'from':query_from,
+                        'to':dt.datetime.now(dt.timezone.utc).isoformat(),'page':page,'pageSize':100})
+                    grouped=client.request('/errors/groups?'+params)
+                    for row in grouped['items']:
+                        name=(row.get('exceptionClass') or '').removeprefix('bench.')
+                        actual_groups[name]={'count':row['occurrenceCount'],'first':row['firstSeen'],'last':row['lastSeen']}
+                    if page*100>=grouped['total']:break
+                    page+=1
+                def parsed(value):return dt.datetime.fromisoformat(value.replace('Z','+00:00'))
+                metrics['groups_match']=set(actual_groups)==set(expected['groups']) and all(
+                    actual_groups[name]['count']==group['count'] and parsed(actual_groups[name]['first'])==parsed(group['first'])
+                    and parsed(actual_groups[name]['last'])==parsed(group['last']) for name,group in expected['groups'].items())
+                metrics['producer_valid']=max(metrics['producer_lag_seconds'],default=0)<1
+                metrics['agents_alive']=all(p.poll() is None for p in processes)
+
             finally:
                 for file in files: file.close()
             for job in probe_jobs: job.result()
@@ -225,7 +275,7 @@ def run(args):
         (out/'report.json').write_text(json.dumps(metrics, indent=2))
     print(json.dumps({'counts_match': metrics['counts_match'], 'query_p95_seconds': metrics['query_p95_seconds'],
         'visibility_p95_seconds': metrics['visibility_p95_seconds'], 'output': str(out)}))
-    return 0 if metrics['counts_match'] and not metrics['check_failures'] and not metrics['query_failures'] else 1
+    return 0 if metrics['counts_match'] and metrics['groups_match'] and metrics['producer_valid'] and metrics['agents_alive'] and not metrics['check_failures'] and not metrics['query_failures'] else 1
 
 
 def main():
@@ -239,12 +289,13 @@ def main():
     parser.add_argument('--error-ratio', type=float, default=.01); parser.add_argument('--stack-lines', type=int, default=8)
     parser.add_argument('--fingerprints', type=int, default=100); parser.add_argument('--uris', type=int, default=1000)
     parser.add_argument('--hot-source', action='store_true'); parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--history-seed-mb',type=float,default=0); parser.add_argument('--history-days',type=float,default=180)
     parser.add_argument('--query-users', type=int, default=10); parser.add_argument('--warmup', type=int, default=15)
     parser.add_argument('--drain-seconds', type=int, default=1800); parser.add_argument('--visibility-timeout', type=int, default=120)
     parser.add_argument('--burst-start', type=int, default=3600); parser.add_argument('--burst-seconds', type=int, default=0)
     parser.add_argument('--burst-multiplier', type=float, default=10)
     args = parser.parse_args()
-    if args.agents < 1 or args.gb_per_day <= 0 or args.seconds < 1 or not 0 <= args.error_ratio <= 1 or min(args.fingerprints,args.uris)<1:
+    if not 1 <= args.history_days <= 180 or args.history_seed_mb<0 or not 1 <= args.upload_workers <= 4 or args.query_users < 0 or args.stack_lines < 0 or min(args.warmup,args.drain_seconds,args.burst_seconds)<0 or args.visibility_timeout <= 0 or args.burst_multiplier < 1 or args.agents < 1 or args.gb_per_day <= 0 or args.seconds < 1 or not 0 <= args.error_ratio <= 1 or min(args.fingerprints,args.uris)<1:
         parser.error('Invalid workload bounds')
     return run(args)
 

@@ -23,3 +23,11 @@ EXPLAIN ANALYZE SELECT minute_at, SUM(access_count) FROM api_access_minute
 EXPLAIN ANALYZE SELECT o.id,o.occurred_at FROM error_occurrence o JOIN error_group g ON g.id=o.group_id
  WHERE g.service_name=@ns AND o.occurred_at BETWEEN @from_at AND @to_at
  ORDER BY o.occurred_at DESC,o.id DESC LIMIT 50;
+
+-- Optimized narrow aggregation; compare actual rows/loops with the preceding group query.
+EXPLAIN ANALYZE SELECT g.id,g.summary,a.last_seen,a.total_count
+ FROM error_group g JOIN (SELECT o.group_id,MAX(o.occurred_at) last_seen,COUNT(*) total_count
+ FROM error_occurrence o JOIN error_group eligible ON eligible.id=o.group_id
+ WHERE eligible.service_name=@ns AND o.occurred_at BETWEEN @from_at AND @to_at
+ GROUP BY o.group_id) a ON a.group_id=g.id
+ ORDER BY a.last_seen DESC LIMIT 20;

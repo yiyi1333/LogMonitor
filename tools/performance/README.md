@@ -21,4 +21,4 @@ python3 tools/performance/benchmark.py --isolated \
 
 在中心、MySQL 和生成器主机分别记录规格及版本、网络链路，Linux 使用 `pidstat -rud 1`、`iostat -xz 1`，通过 JDK 的 `jstat -gcutil PID 1000` 采集 GC。使用 MySQL 客户端的 `--defaults-extra-file` 或受保护的凭证环境运行 `mysql-observe.sql`；不要在命令行传密码。该脚本仅会话变量及只读查询，不自动开启全局慢日志。
 
-180 天数据预置和重启/断网/清理竞争必须在独立环境按验收手册执行；短时 H2 烟测不证明 MySQL 容量。冷启动和预热运行分别记录。长时验收标准见 `docs/performance/PHASE1.md`。
+使用 `--history-seed-mb 1024 --history-days 180` 预置匿名历史日志，再通过真实 Agent 入库；预置数量按实际存储行数/基数选择，少量跨 180 天记录不能代替完整规模的历史数据。重启/断网/清理竞争必须在独立环境按验收手册执行；短时 H2 烟测不证明 MySQL 容量。冷启动和预热运行分别记录。长时验收标准见 `docs/performance/PHASE1.md`。

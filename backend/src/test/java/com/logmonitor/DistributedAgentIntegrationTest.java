@@ -130,9 +130,11 @@ class DistributedAgentIntegrationTest extends IntegrationTestSupport {
                 sha256(new byte[0]), status().isOk());
         assertThat(mapper.totalAccessCount()).isEqualTo(2);
 
-        mvc.perform(get("/api/dashboard/summary").session(root).param("agentId", String.valueOf(first.id)))
+        mvc.perform(get("/api/dashboard/summary").session(root).param("agentId", String.valueOf(first.id))
+                        .param("from", "2026-08-18T00:00:00Z").param("to", "2026-08-18T02:00:00Z"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalAccess").value(1));
-        mvc.perform(get("/api/dashboard/summary").session(root))
+        mvc.perform(get("/api/dashboard/summary").session(root)
+                        .param("from", "2026-08-18T00:00:00Z").param("to", "2026-08-18T02:00:00Z"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalAccess").value(2));
 
         upload(first, sourceA, "bad-checksum", "file-a", "gen-a", event.length, event, false,
@@ -151,7 +153,7 @@ class DistributedAgentIntegrationTest extends IntegrationTestSupport {
         MvcResult result = mvc.perform(post("/api/agent/v1/enroll").contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsBytes(Map.of(
                                 "username", username, "password", password, "name", name,
-                                "hostName", host, "version", "1.0.8",
+                                "hostName", host, "version", "1.0.9",
                                 "roots", List.of(Map.of("path", "/srv/logs", "realPath", "/srv/logs"))))))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.token").isString()).andReturn();
         JsonNode body = json.readTree(result.getResponse().getContentAsByteArray());
@@ -196,7 +198,7 @@ class DistributedAgentIntegrationTest extends IntegrationTestSupport {
     private void heartbeat(Enrolled agent, long sourceId, String state, String realPath) throws Exception {
         mvc.perform(post("/api/agent/v1/heartbeat").header("Authorization", bearer(agent))
                         .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(Map.of(
-                                "version", "1.0.8", "spoolBytes", 0, "spoolLimitBytes", 5368709120L,
+                                "version", "1.0.9", "spoolBytes", 0, "spoolLimitBytes", 5368709120L,
                                 "sources", List.of(Map.of("sourceId", sourceId, "status", state,
                                         "realPath", realPath, "files", 1, "bytesRead", 0,
                                         "totalBytes", 0, "parseErrors", 0))))))

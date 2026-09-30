@@ -91,6 +91,32 @@ public class AgentPipelineTest {
             assertTrue(Files.list(spool).anyMatch(p->p.toString().endsWith(".json")));
         }
     }
+    @Test public void truncationWaitsForInFlightBatchBeforeResettingGeneration() throws Exception {
+        try(Center center=new Center();AgentRuntime runtime=center.runtime()) {
+            center.write(1,512);call(runtime,"pollConfiguration");call(runtime,"scan");
+            RuntimeState before=AgentFiles.read(center.data.resolve("state.json"),RuntimeState.class);
+            String generation=before.files.values().iterator().next().generation;
+            center.blockSource=1;ExecutorService worker=Executors.newSingleThreadExecutor();
+            try {
+                Future<?> upload=worker.submit(()->{try{call(runtime,"uploadOne");}catch(Exception failure){throw new RuntimeException(failure);}});
+                assertTrue(center.entered.await(2,TimeUnit.SECONDS));center.write(1,32);call(runtime,"scan");
+                assertEquals(generation,AgentFiles.read(center.data.resolve("state.json"),RuntimeState.class).files.values().iterator().next().generation);
+                center.release.countDown();upload.get(3,TimeUnit.SECONDS);call(runtime,"scan");
+                RuntimeState after=AgentFiles.read(center.data.resolve("state.json"),RuntimeState.class);
+                assertNotEquals(generation,after.files.values().iterator().next().generation);
+                assertEquals(32,after.files.values().iterator().next().offset);
+            }finally{center.release.countDown();worker.shutdownNow();}
+        }
+    }
+    @Test public void lostAckRetriesSameBatchRatherThanAdvancingOrDeletingIt() throws Exception {
+        try(Center center=new Center();AgentRuntime runtime=center.runtime()) {
+            center.write(1,128);call(runtime,"pollConfiguration");call(runtime,"scan");center.dropAck=true;
+            assertFalse((Boolean)call(runtime,"uploadOne"));
+            String batch=center.received.get(0).batchId;
+            java.lang.reflect.Field retry=AgentRuntime.class.getDeclaredField("retryAt");retry.setAccessible(true);((Map<?,?>)retry.get(runtime)).clear();
+            assertTrue((Boolean)call(runtime,"uploadOne"));assertEquals(batch,center.received.get(1).batchId);
+        }
+    }
     private final class Center implements AutoCloseable {
         final Path root=temporary.newFolder().toPath().toRealPath();
         final Path data=temporary.newFolder().toPath();
@@ -101,7 +127,7 @@ public class AgentPipelineTest {
         final AtomicInteger requests=new AtomicInteger();
         final CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
         final RemoteConfig remote=new RemoteConfig();
-        volatile long blockSource=-1;volatile int rejectStatus;volatile Heartbeat lastHeartbeat;
+        volatile long blockSource=-1;volatile int rejectStatus;volatile boolean dropAck;volatile Heartbeat lastHeartbeat;
         Center()throws Exception {
             remote.revision=1;
             for(int i=1;i<=2;i++) {
@@ -126,6 +152,7 @@ public class AgentPipelineTest {
                 Map<String,Object> reply=new HashMap<String,Object>();
                 if(status==0){received.add(metadata);reply.put("status","ACK");reply.put("expectedOffset",metadata.endOffset);status=200;}
                 else{reply.put("code","TEST");reply.put("message","retry");if(status==409)reply.put("expectedOffset",0);exchange.getResponseHeaders().set("Retry-After","5");}
+                if(dropAck){dropAck=false;exchange.close();return;}
                 byte[] body=AgentFiles.JSON.writeValueAsBytes(reply);exchange.sendResponseHeaders(status,body.length);
                 exchange.getResponseBody().write(body);exchange.close();
             });

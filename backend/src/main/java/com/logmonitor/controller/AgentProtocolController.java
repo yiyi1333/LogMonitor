@@ -28,10 +28,13 @@ import org.springframework.web.multipart.MultipartFile;
 public class AgentProtocolController {
     private final AgentService agents;
     private final AgentIngestService ingest;
+    private final com.logmonitor.service.IngestAdmission admission;
+    private final com.logmonitor.service.PipelineMetrics metrics;
 
-    public AgentProtocolController(AgentService agents, AgentIngestService ingest) {
+    public AgentProtocolController(AgentService agents, AgentIngestService ingest,
+            com.logmonitor.service.IngestAdmission admission, com.logmonitor.service.PipelineMetrics metrics) {
         this.agents = agents;
-        this.ingest = ingest;
+        this.ingest = ingest; this.admission = admission; this.metrics = metrics;
     }
 
     @PostMapping("/enroll")
@@ -59,7 +62,15 @@ public class AgentProtocolController {
     public AgentBatchAck batch(Authentication authentication,
                                @RequestPart("metadata") AgentBatchMetadata metadata,
                                @RequestPart("payload") MultipartFile payload) throws IOException {
-        return ingest.accept(principal(authentication), metadata, payload.getInputStream(), payload.getSize());
+        AgentPrincipal agent = principal(authentication);
+        if (metadata == null) throw new IllegalArgumentException("批次元数据无效");
+        try (var lease = admission.acquire(metadata.sourceId()); var input = payload.getInputStream()) {
+            metrics.add("compressedBytes", payload.getSize());
+            return ingest.accept(agent, metadata, input, payload.getSize());
+        } catch (org.springframework.dao.DataAccessException exception) {
+            throw new com.logmonitor.service.AgentProtocolException("INGEST_RETRYABLE", HttpStatus.SERVICE_UNAVAILABLE,
+                    "采集事务失败，请重试原批次");
+        }
     }
 
     private AgentPrincipal principal(Authentication authentication) {

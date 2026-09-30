@@ -55,8 +55,10 @@ final class AgentRuntime implements AutoCloseable {
     private final Set<Long> inFlight = new HashSet<Long>();
     private final Map<Long, Long> retryAt = new HashMap<Long, Long>();
     private final Map<Long, Integer> failures = new HashMap<Long, Integer>();
-    private long cachedSpoolBytes;
-    private boolean diskHealthy = true;
+    private volatile long cachedSpoolBytes;
+    private volatile boolean diskHealthy = true;
+    private List<ScanFile> scanFiles = new ArrayList<ScanFile>();
+    private long catalogAt;
     private long readBytes, uploadedBytes, retries, heartbeatNanos, heartbeatCount;
     private long previousReadBytes, previousUploadedBytes, previousReportNanos = System.nanoTime();
     private int scanCursor;
@@ -106,6 +108,7 @@ final class AgentRuntime implements AutoCloseable {
 
     void runOnce() throws Exception {
         pollConfiguration();
+        synchronized (this) { catalogAt=0; }
         scan();
         while (uploadOne()) {}
         heartbeat();
@@ -121,6 +124,7 @@ final class AgentRuntime implements AutoCloseable {
             for (SourceConfig source : update.sources) active.add(source.id);
             // Removed sources become ineligible immediately; physical cleanup waits for the in-flight upload.
             remote = update;
+            catalogAt = 0;
             clearRemovedSources(active);
             local.configRevision = update.revision;
             AgentFiles.writeAtomic(remoteConfigPath, remote);
@@ -130,23 +134,30 @@ final class AgentRuntime implements AutoCloseable {
     }
 
     private void scan() throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-        List<ScanFile> files = new ArrayList<ScanFile>();
+        List<ScanFile> files;
+        List<SourceConfig> configured = null;
         synchronized (this) {
             if (remote == null || remote.sources == null) return;
-            for (SourceConfig source : remote.sources) {
-                SourceReport report = validate(source);
-                reports.put(source.id, report);
-                if (!"ACTIVE".equals(report.status)) continue;
-                List<Path> paths = matchingFiles(source);
-                report.files = paths.size();
-                for (Path path : paths) {
-                    report.totalBytes += Files.size(path);
-                    files.add(new ScanFile(source, path));
-                }
-                report.lastCollectedAt = Instant.now().toString();
-            }
+            if (System.currentTimeMillis()-catalogAt >= 10000) configured = new ArrayList<SourceConfig>(remote.sources);
+            files = scanFiles;
         }
+        if (configured != null) {
+            List<ScanFile> discovered = new ArrayList<ScanFile>();
+            // Directory discovery never holds the shared state lock used by heartbeats and upload completion.
+            for (SourceConfig source : configured) {
+                SourceReport report = validate(source);
+                if ("ACTIVE".equals(report.status)) {
+                    try {
+                        List<Path> paths = matchingFiles(source); report.files = paths.size();
+                        for (Path path : paths) { report.totalBytes += Files.size(path); discovered.add(new ScanFile(source,path)); }
+                        report.lastCollectedAt = Instant.now().toString();
+                    } catch (IOException failure) { report.status="ERROR"; report.error="Log directory unavailable"; }
+                }
+                synchronized (this) { if (active(source.id)) reports.put(source.id,report); }
+            }
+            synchronized (this) { scanFiles=discovered; files=scanFiles; catalogAt=System.currentTimeMillis(); }
+        }
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
         if (files.isEmpty()) { Thread.sleep(1000); return; }
         int withoutProgress = 0;
         while (System.nanoTime() < deadline && withoutProgress < files.size()) {
@@ -366,7 +377,7 @@ final class AgentRuntime implements AutoCloseable {
     }
 
     private synchronized void reportMetrics() throws IOException {
-        try { rebuildQueue(); diskHealthy = true; }
+        try { rebuildQueue(); diskHealthy = true; catalogAt=0; }
         catch (IOException exception) { diskHealthy = false; throw exception; }
         Map<String, Object> values = new java.util.LinkedHashMap<String, Object>();
         values.put("type", "agent_metrics"); values.put("readBytes", readBytes); values.put("uploadedBytes", uploadedBytes);

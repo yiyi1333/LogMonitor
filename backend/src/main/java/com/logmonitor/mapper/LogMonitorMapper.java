@@ -365,17 +365,19 @@ public interface LogMonitorMapper {
                                             @Param("instanceKey") String instanceKey,@Param("sourceId") Long sourceId);
 
     @Select("<script>SELECT g.id,g.fingerprint,g.service_name AS service,g.service_name AS applicationNamespace," +
-            "CASE WHEN COUNT(DISTINCT o.source_id)=1 THEN MIN(o.source_id) END AS sourceId,g.category,g.exception_class,g.summary," +
-            "g.first_seen,MAX(o.occurred_at) last_seen,COUNT(*) occurrence_count,g.inferred_uri " +
-            "FROM error_group g JOIN error_occurrence o ON o.group_id=g.id WHERE o.occurred_at BETWEEN #{from} AND #{to}" +
-            "<if test='service != null and service != \"\"'> AND g.service_name=#{service}</if>" +
+            "aggregated.sourceId,g.category,g.exception_class,g.summary,g.first_seen,aggregated.last_seen,aggregated.occurrence_count,g.inferred_uri " +
+            "FROM error_group g JOIN (SELECT o.group_id," +
+            "CASE WHEN COUNT(DISTINCT o.source_id)=1 THEN MIN(o.source_id) END AS sourceId," +
+            "MAX(o.occurred_at) last_seen,COUNT(*) occurrence_count " +
+            "FROM error_occurrence o JOIN error_group eligible ON eligible.id=o.group_id WHERE o.occurred_at BETWEEN #{from} AND #{to}" +
+            "<if test='service != null and service != &quot;&quot;'> AND eligible.service_name=#{service}</if>" +
             "<if test='sourceId != null'> AND o.source_id=#{sourceId}</if>" +
-            "<if test='instanceKey != null and instanceKey != \"\"'> AND o.instance_key=#{instanceKey}</if>" +
-            "<if test='category != null and category != \"\"'> AND g.category=#{category}</if>" +
-            "<if test='endpoint != null and endpoint != \"\"'> AND g.inferred_uri=#{endpoint}</if>" +
-            "<if test='keyword != null and keyword != \"\"'> AND (g.summary LIKE CONCAT('%',#{keyword},'%') OR g.exception_class LIKE CONCAT('%',#{keyword},'%'))</if> " +
-            "GROUP BY g.id,g.fingerprint,g.service_name,g.category,g.exception_class,g.summary,g.first_seen,g.inferred_uri " +
-            "ORDER BY last_seen DESC LIMIT #{limit} OFFSET #{offset}</script>")
+            "<if test='instanceKey != null and instanceKey != &quot;&quot;'> AND o.instance_key=#{instanceKey}</if>" +
+            "<if test='category != null and category != &quot;&quot;'> AND eligible.category=#{category}</if>" +
+            "<if test='endpoint != null and endpoint != &quot;&quot;'> AND eligible.inferred_uri=#{endpoint}</if>" +
+            "<if test='keyword != null and keyword != &quot;&quot;'> AND (eligible.summary LIKE CONCAT('%',#{keyword},'%') OR eligible.exception_class LIKE CONCAT('%',#{keyword},'%'))</if> " +
+            "GROUP BY o.group_id) aggregated ON aggregated.group_id=g.id " +
+            "ORDER BY aggregated.last_seen DESC LIMIT #{limit} OFFSET #{offset}</script>")
     List<ErrorGroupRow> errorGroups(@Param("from") Instant from,@Param("to") Instant to,@Param("service") String service,
                                     @Param("instanceKey") String instanceKey,@Param("sourceId") Long sourceId,@Param("category") String category,
                                     @Param("keyword") String keyword,@Param("endpoint") String endpoint,
@@ -509,6 +511,54 @@ public interface LogMonitorMapper {
     void deleteOldAccessDedup(Instant cutoff);
     @Delete("DELETE FROM access_dedup_baseline WHERE minute_at < #{cutoff}")
     void deleteOldAccessBaseline(Instant cutoff);
+
+    @Select("<script>SELECT event_key FROM access_event_dedup WHERE event_key IN " +
+            "<foreach collection='keys' item='key' open='(' close=')' separator=','>#{key}</foreach></script>")
+    List<String> existingAccessKeys(@Param("keys") List<String> keys);
+    @Select("<script>SELECT event_key FROM error_occurrence WHERE event_key IN " +
+            "<foreach collection='keys' item='key' open='(' close=')' separator=','>#{key}</foreach></script>")
+    List<String> existingErrorKeys(@Param("keys") List<String> keys);
+    @Select("<script>SELECT uri_hash,minute_at,baseline_until FROM access_dedup_baseline WHERE source_id=#{sourceId} AND (" +
+            "<foreach collection='keys' item='key' separator=' OR '>(uri_hash=#{key.uriHash} AND minute_at=#{key.minute})</foreach>)</script>")
+    List<Map<String,Object>> accessBaselines(@Param("sourceId") Long sourceId,@Param("keys") List<AccessBucketInsert> keys);
+    @Insert("<script>INSERT INTO access_event_dedup(event_key,occurred_at) VALUES " +
+            "<foreach collection='rows' item='row' separator=','>(#{row.key},#{row.at})</foreach></script>")
+    void insertAccessKeys(@Param("rows") List<EventKeyInsert> rows);
+    @Insert("<script><choose><when test='_databaseId == &quot;h2&quot;'>" +
+            "MERGE INTO api_access_minute t USING (VALUES " +
+            "<foreach collection='rows' item='row' separator=','>(#{row.service},#{row.instanceKey},#{row.sourceId},#{row.uri},#{row.uriHash},#{row.minute},#{row.count})</foreach>" +
+            ") incoming(service_name,instance_key,source_id,uri,uri_hash,minute_at,access_count) " +
+            "ON t.source_id=incoming.source_id AND t.uri_hash=incoming.uri_hash AND t.minute_at=incoming.minute_at " +
+            "WHEN MATCHED THEN UPDATE SET access_count=t.access_count+incoming.access_count " +
+            "WHEN NOT MATCHED THEN INSERT(service_name,instance_key,source_id,uri,uri_hash,method,minute_at,access_count) " +
+            "VALUES(incoming.service_name,incoming.instance_key,incoming.source_id,incoming.uri,incoming.uri_hash,'UNKNOWN',incoming.minute_at,incoming.access_count)" +
+            "</when><otherwise>INSERT INTO api_access_minute(service_name,instance_key,source_id,uri,uri_hash,method,minute_at,access_count) VALUES " +
+            "<foreach collection='rows' item='row' separator=','>(#{row.service},#{row.instanceKey},#{row.sourceId},#{row.uri},#{row.uriHash},'UNKNOWN',#{row.minute},#{row.count})</foreach> " +
+            "ON DUPLICATE KEY UPDATE access_count=access_count+VALUES(access_count)</otherwise></choose></script>")
+    void upsertAccessBuckets(@Param("rows") List<AccessBucketInsert> rows);
+    @Insert("<script><choose><when test='_databaseId == &quot;h2&quot;'>" +
+            "MERGE INTO error_group t USING (VALUES " +
+            "<foreach collection='rows' item='row' separator=','>(#{row.fingerprint},#{row.signature},#{row.service},#{row.category},#{row.exceptionClass},#{row.summary},#{row.firstSeen},#{row.lastSeen},#{row.count},#{row.inferredUri})</foreach>" +
+            ") incoming(fingerprint,signature_hash,service_name,category,exception_class,summary,first_seen,last_seen,occurrence_count,inferred_uri) " +
+            "ON t.fingerprint=incoming.fingerprint " +
+            "WHEN MATCHED THEN UPDATE SET first_seen=LEAST(t.first_seen,incoming.first_seen),last_seen=GREATEST(t.last_seen,incoming.last_seen)," +
+            "occurrence_count=t.occurrence_count+incoming.occurrence_count,inferred_uri=COALESCE(incoming.inferred_uri,t.inferred_uri),updated_at=CURRENT_TIMESTAMP " +
+            "WHEN NOT MATCHED THEN INSERT(fingerprint,signature_hash,service_name,category,exception_class,summary,first_seen,last_seen,occurrence_count,inferred_uri,updated_at) " +
+            "VALUES(incoming.fingerprint,incoming.signature_hash,incoming.service_name,incoming.category,incoming.exception_class,incoming.summary,incoming.first_seen,incoming.last_seen,incoming.occurrence_count,incoming.inferred_uri,CURRENT_TIMESTAMP)" +
+            "</when><otherwise>INSERT INTO error_group(fingerprint,signature_hash,service_name,category,exception_class,summary,first_seen,last_seen,occurrence_count,inferred_uri,updated_at) VALUES " +
+            "<foreach collection='rows' item='row' separator=','>(#{row.fingerprint},#{row.signature},#{row.service},#{row.category},#{row.exceptionClass},#{row.summary},#{row.firstSeen},#{row.lastSeen},#{row.count},#{row.inferredUri},CURRENT_TIMESTAMP)</foreach> " +
+            "ON DUPLICATE KEY UPDATE first_seen=LEAST(first_seen,VALUES(first_seen)),last_seen=GREATEST(last_seen,VALUES(last_seen))," +
+            "occurrence_count=occurrence_count+VALUES(occurrence_count),inferred_uri=COALESCE(VALUES(inferred_uri),inferred_uri),updated_at=CURRENT_TIMESTAMP</otherwise></choose></script>")
+    void upsertErrorGroups(@Param("rows") List<ErrorGroupInsert> rows);
+    @Select("<script>SELECT id,fingerprint FROM error_group WHERE fingerprint IN " +
+            "<foreach collection='keys' item='key' open='(' close=')' separator=','>#{key}</foreach></script>")
+    List<Map<String,Object>> errorGroupIds(@Param("keys") List<String> keys);
+    @Insert("<script>INSERT INTO error_occurrence(group_id,occurred_at,thread_name,message_text,stack_trace,inferred_uri,association_type,source_path,source_offset,event_key,instance_key,source_id) VALUES " +
+            "<foreach collection='rows' item='row' separator=','>(#{row.groupId},#{row.occurredAt},#{row.thread},#{row.message},#{row.stackTrace},#{row.inferredUri},#{row.associationType},#{row.sourcePath},#{row.sourceOffset},#{row.eventKey},#{row.instanceKey},#{row.sourceId})</foreach></script>")
+    void insertOccurrences(@Param("rows") List<OccurrenceInsert> rows);
+
+    record EventKeyInsert(String key, Instant at) {}
+    record AccessBucketInsert(String service,String instanceKey,Long sourceId,String uri,String uriHash,Instant minute,long count) {}
 
     class ErrorGroupInsert {
         public Long id; public String fingerprint; public String signature; public String service; public String category; public String exceptionClass;

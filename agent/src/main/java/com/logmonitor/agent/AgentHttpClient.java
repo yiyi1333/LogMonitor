@@ -26,13 +26,22 @@ final class AgentHttpClient {
     private final ObjectMapper json = AgentFiles.JSON;
     private final String serverUrl;
     private final String token;
+    private final long uploadDeadlineMillis;
+    private static final java.util.concurrent.ScheduledExecutorService DEADLINES = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread=new Thread(runnable,"agent-http-deadline");thread.setDaemon(true);return thread;
+    });
 
     AgentHttpClient(String serverUrl, String token) {
         this(serverUrl, token, false);
     }
 
     AgentHttpClient(String serverUrl, String token, boolean allowHttp) {
+        this(serverUrl, token, allowHttp, 45000);
+    }
+
+    AgentHttpClient(String serverUrl,String token,boolean allowHttp,long uploadDeadlineMillis) {
         validateServerUrl(serverUrl, allowHttp);
+        this.uploadDeadlineMillis=uploadDeadlineMillis;
         this.serverUrl = trimSlash(serverUrl);
         this.token = token;
     }
@@ -75,26 +84,23 @@ final class AgentHttpClient {
 
     BatchAck upload(BatchMetadata metadata, Path payload) throws IOException, UploadException {
         String boundary = "----LogMonitor" + UUID.randomUUID().toString().replace("-", "");
-        HttpURLConnection connection = open("/api/agent/v1/batches", "POST", true);
-        connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-        connection.setChunkedStreamingMode(64 * 1024);
-        connection.setDoOutput(true);
-        OutputStream output = connection.getOutputStream();
-        byte[] newline = "\r\n".getBytes(StandardCharsets.US_ASCII);
-        output.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"metadata\"\r\n" +
-                "Content-Type: application/json\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
-        output.write(json.writeValueAsBytes(metadata));
-        output.write(newline);
-        output.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"payload\"; filename=\"batch.gz\"\r\n" +
-                "Content-Type: application/gzip\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
-        Files.copy(payload, output);
-        output.write(newline);
-        output.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.US_ASCII));
-        output.close();
-        int status = connection.getResponseCode();
-        if (status >= 200 && status < 300) return response(connection, BatchAck.class, status);
-        ApiError error = readError(connection);
-        throw new UploadException(status, error, retryAfterMillis(connection.getHeaderField("Retry-After")));
+        final HttpURLConnection connection = open("/api/agent/v1/batches", "POST", true);
+        java.util.concurrent.ScheduledFuture<?> deadline=DEADLINES.schedule(connection::disconnect,uploadDeadlineMillis,java.util.concurrent.TimeUnit.MILLISECONDS);
+        boolean completed=false;
+        try {
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            connection.setChunkedStreamingMode(64 * 1024); connection.setDoOutput(true);
+            byte[] newline = "\r\n".getBytes(StandardCharsets.US_ASCII);
+            try (OutputStream output=connection.getOutputStream()) {
+                output.write(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                output.write(json.writeValueAsBytes(metadata));output.write(newline);
+                output.write(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"payload\"; filename=\"batch.gz\"\r\nContent-Type: application/gzip\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                Files.copy(payload,output);output.write(newline);output.write(("--"+boundary+"--\r\n").getBytes(StandardCharsets.US_ASCII));
+            }
+            int status=connection.getResponseCode();
+            if(status>=200 && status<300) {BatchAck ack=response(connection,BatchAck.class,status);completed=true;return ack;}
+            throw new UploadException(status,readError(connection),retryAfterMillis(connection.getHeaderField("Retry-After")));
+        } finally {deadline.cancel(false);if(!completed)connection.disconnect();}
     }
 
     private HttpURLConnection open(String path, String method, boolean authenticated) throws IOException {
@@ -148,7 +154,7 @@ final class AgentHttpClient {
 
     private static long retryAfterMillis(String value) {
         if (value == null) return 0;
-        try { return Math.max(0, Math.min(3600000L, Long.parseLong(value) * 1000)); }
+        try { return Math.max(0, Math.min(3600000L, Math.min(3600L, Long.parseLong(value)) * 1000)); }
         catch (NumberFormatException ignored) {
             try { return Math.max(0, Math.min(3600000L, java.time.ZonedDateTime.parse(value,
                     java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()-System.currentTimeMillis())); }

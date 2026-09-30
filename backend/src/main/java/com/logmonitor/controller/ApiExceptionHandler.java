@@ -39,7 +39,9 @@ public class ApiExceptionHandler {
         body.put("code", exception.code());
         body.put("message", locale.error(exception.code(), exception.getMessage()));
         if (exception.expectedOffset() != null) body.put("expectedOffset", exception.expectedOffset());
-        return ResponseEntity.status(exception.status()).body(body);
+        return ResponseEntity.status(exception.status())
+                .headers(headers -> { if (exception.status() == HttpStatus.SERVICE_UNAVAILABLE) headers.set("Retry-After", "1"); })
+                .body(body);
     }
 
     @ExceptionHandler(SourceManagementException.class)

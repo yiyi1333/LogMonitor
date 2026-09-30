@@ -280,11 +280,11 @@ sequenceDiagram
 | 周期 | 任务 |
 | --- | --- |
 | 每 10 秒 | 使用 ETag/配置版本轮询远端来源配置 |
-| 每 10 秒 | 校验目录和 Glob，扫描文件增量 |
-| 每 1 秒 | 按文件和偏移顺序尝试上传一个队列批次 |
+| 每 10 秒 | 锁外更新目录和 Glob 文件清单；既有文件连续轮转读取 |
+| 连续调度 | 默认 2 个线程上传，同来源按偏移串行；空队列等待 1 秒 |
 | 每 30 秒 | 上报版本、队列用量、来源校验和采集状态 |
 
-配置更新移除来源时，Agent 同步清理该来源的内存报告、文件状态和磁盘队列；目录恢复后，下一次成功扫描会用正常报告覆盖旧异常，无须重启 Agent。后端心跳只处理属于当前 Agent 且未删除的来源，先持久化校验结果，再从当前有效来源汇总 `collector_agent.last_error`。`ACTIVE` 报告清空该来源的校验错误；漏报来源保留其既有校验结果，后端检测到的真实目录冲突同样参与汇总。所有有效来源的错误消除后，服务器错误清空；离线和队列阻塞仍优先于错误、在线状态。
+配置更新移除来源时，Agent 立即停止派发并清理内存报告，待该来源在途任务结束后清理文件状态和磁盘队列；目录恢复后，下一次成功扫描会用正常报告覆盖旧异常，无须重启 Agent。后端心跳只处理属于当前 Agent 且未删除的来源，先持久化校验结果，再从当前有效来源汇总 `collector_agent.last_error`。`ACTIVE` 报告清空该来源的校验错误；漏报来源保留其既有校验结果，后端检测到的真实目录冲突同样参与汇总。所有有效来源的错误消除后，服务器错误清空；离线和队列阻塞仍优先于错误、在线状态。
 
 Agent 先把 gzip 内容和 JSON 元数据分别原子写入磁盘队列，再推进本地游标。中心 ACK 后才删除队列文件，因此断网、Agent 重启或 ACK 丢失不会主动丢日志。队列达到 5GB 后暂停读取，保持现有批次并上报 `BLOCKED`。
 
@@ -293,7 +293,7 @@ Agent 先把 gzip 内容和 JSON 元数据分别原子写入磁盘队列，再�
 每个批次包含 `batchId/sourceId/fileKey/generation/path/startOffset/endOffset/fileSize/modifiedAt/charset/checksum`。中心端处理顺序：
 
 1. Bearer Token 认证 Agent，确认来源属于该 Agent 且仍有效。
-2. 在来源锁内检查来源状态和批次是否已经接收；锁持续到上传事务完成，确保批次提交、来源删除和命名空间迁移严格串行。
+2. 非阻塞取得全局上传许可和来源锁；繁忙立即返回 503 和 Retry-After，不开启上传事务。在来源锁内检查来源状态和批次是否已经接收；锁持续到上传事务完成，确保批次提交、来源删除和命名空间迁移严格串行。
 3. 限制压缩请求约 5MB、解压后内容最多 4MiB，并验证 SHA-256。
 4. 校验文件路径位于来源目录内，校验 generation 和期望偏移。
 5. 在内存中解压并调用与本地采集相同的解析、脱敏和存储逻辑。
@@ -544,15 +544,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 `v1.0.3` 的异常恢复修复不改变 API 字段和数据库结构。升级时先部署后端和前端，再升级 Agent：后端兼容现有 `v1.0.0` Agent，忽略它持续上报的已删除来源报告；新版 Agent 进一步在配置更新时清理内存旧报告。已存储的服务器旧异常会在下一次成功心跳汇总时修正，无须手工修改数据库。
 
 ```bash
-tar -xzf logmonitor-backend-1.0.8.tar.gz
-sudo ./logmonitor-backend-1.0.8/install.sh
+tar -xzf logmonitor-backend-1.0.9.tar.gz
+sudo ./logmonitor-backend-1.0.9/install.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.0.8.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.8/install.sh
+tar -xzf logmonitor-frontend-1.0.9.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.9/install.sh
 
-tar -xzf logmonitor-agent-1.0.8.tar.gz
-sudo ./logmonitor-agent-1.0.8/install.sh
+tar -xzf logmonitor-agent-1.0.9.tar.gz
+sudo ./logmonitor-agent-1.0.9/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -597,7 +597,7 @@ sudo ./logmonitor-agent-1.0.8/install.sh
 
 ### 13.1 版本约定
 
-最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.8`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.9`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
 
 - 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
 - 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.3` -> `v1.1.0`。
@@ -638,12 +638,18 @@ Agent 读取使用单写线程，每轮按文件轮转读取，单轮最多 1 �
 
 
 
+中心上传在控制器开启事务前准入，`INGEST_MAX_INFLIGHT` 默认 4（支持 1–64），满载或来源忙时返回 `503 INGEST_BUSY` 和 `Retry-After: 1`；数据库写入失败整批回滚后返回 `503 INGEST_RETRYABLE`。准入只作用于上传事务，身份认证仍执行既有数据库检查；配置、心跳、查询不占用上传许可。成功 ACK 仍在事务提交后返回。
+
+访问与错误事件去重、基线查询及组 ID 查询按块执行；去重记录、访问聚合、错误组、错误明细批量写入，单块最多 500 行且估算参数内容不超过 1MiB，整批只提交一次。错误组按指纹顺序原子累加；MySQL 使用 ON DUPLICATE KEY UPDATE，H2 使用 MERGE，H2 首次创建冲突同样需重试已回滚的原批次。不会忽略唯一键冲突或提前 ACK。
+
+错误组列表在筛选内仅按 group_id 聚合时间、次数和来源，再读取错误摘要等字段，保留精确总数、分页和排序。每天 03:15 固定 cutoff 后逐批短事务清理，每批最多删除 1000 行（包含显式处理的关联 AI），事务结束后等待 100ms；过期组仅在无发生明细时加行锁清理 AI 和父记录，防止并发补采误删。失败停止本轮，下一轮幂等继续，禁止重入。
+
 `PipelineMetrics` 每分钟输出累计 JSON 统计，包含来源锁、解压、解析、写入耗时以及 JVM/GC/连接池状态，不输出日志正文、凭证和路径。匿名开放到达压测入口为 `tools/performance/benchmark.py`，通过真实 Agent 和上传事务核对访问/错误数量；压测只用于隔离环境，不自动清理服务端数据。MySQL 只读诊断脚本为 `tools/performance/mysql-observe.sql`。本地 H2 烟测不构成 100 台、100GB/天的容量验收。
 
 ## 14. 当前部署约束
 
 - 中心端为单实例，来源锁和立即扫描协调依赖单 JVM。
-- 目标规模为 20 台以内 Agent、总日志量不超过 10GB/天。
+- 原设计目标为 20 台以内 Agent、总日志量不超过 10GB/天；第一阶段隔离环境验收目标为 100 台 Agent、100GB/天。未经目标 MySQL 长时压测，不将验收目标视为已验证容量。
 - 中心数据库只保存分钟访问聚合、错误明细、AI 结果、游标和批次元数据。
 - 原始普通日志和远端 gzip 批次不长期落库，也未接入 OSS。
 - 同一 Agent 可挂载多个目录且应用名称可重复；同一应用命名空间可跨 Agent、跨目录默认汇总，查询按 `sourceId` 下钻。
@@ -681,3 +687,7 @@ Agent 读取使用单写线程，每轮按文件轮转读取，单轮最多 1 �
 ```bash
 sudo bash deploy/rabbitmq/install.sh --management /opt/rabbitmq-packages
 ```
+
+文件目录清单在锁外发现，每 10 秒更新，既有文件连续读取；来源变更和每分钟校准会重建清单。上传连接设置 45 秒总截止时间，超时断开连接并保留原批次重试，避免只设置单次 socket 超时导致在途任务长期阻塞。原 ACK 状态和结束偏移都匹配后才删除磁盘批次。
+
+原生 MySQL V14 回归通过 `MYSQL_IT_URL`、`MYSQL_IT_USER`、`MYSQL_IT_PASSWORD` 和 `MYSQL_IT_ISOLATED=true` 启用，覆盖大批次分块、并发错误组累加、整批回滚、历史首次时间及 AI/明细分批保留清理；默认 H2 回归仍可单独运行。隔离环境验收和回退步骤见 [第一阶段验收手册](performance/PHASE1.md)，实测范围见 [本地验证报告](performance/RESULTS.md)。
