@@ -329,7 +329,7 @@ Agent 先把 gzip 内容和 JSON 元数据分别原子写入磁盘队列，再�
 | 设置 | 所有用户选择 LLM 模型；ROOT 管理供应商、模型、默认模型、连接测试、密钥轮换和模型拉取 |
 | 修改密码 | 所有用户修改自身密码；临时密码用户强制进入 |
 
-主题偏好保存在浏览器 `localStorage`，支持跟随系统、浅色和深色。语言偏好使用 `log-monitor-locale` 保存，首次按 `navigator.languages` 匹配九种语言，未匹配时回退 `zh-CN`。Vue I18n、Element Plus、Day.js、Intl 与 ECharts 共享当前 locale，Axios 同步发送 `Accept-Language`。监控查询先选 `applicationNamespace`，再可选具体 `sourceId`；实例标签由后端统一输出 `displayAddress：applicationName（path）`，未选择来源时跨 Agent、跨目录求和。命名空间和实例选项只读取当前活动日志源；来源删除后立即从全局选项中移除并清理前端失效选择，已解析的历史统计仍按保留策略保存并可通过明确参数查询。
+服务器页挂载目录折叠标题与展开内容使用透明背景，沿用所在服务器卡片的背景，浅色和深色主题保持一致。主题偏好保存在浏览器 `localStorage`，支持跟随系统、浅色和深色。语言偏好使用 `log-monitor-locale` 保存，首次按 `navigator.languages` 匹配九种语言，未匹配时回退 `zh-CN`。Vue I18n、Element Plus、Day.js、Intl 与 ECharts 共享当前 locale，Axios 同步发送 `Accept-Language`。监控查询先选 `applicationNamespace`，再可选具体 `sourceId`；实例标签由后端统一输出 `displayAddress：applicationName（path）`，未选择来源时跨 Agent、跨目录求和。命名空间和实例选项只读取当前活动日志源；来源删除后立即从全局选项中移除并清理前端失效选择，已解析的历史统计仍按保留策略保存并可通过明确参数查询。
 
 错误模块的 `/errors/groups` 保留指纹聚合视图，`/errors/logs` 要求先选择应用命名空间，默认查询滚动最近 24 小时。筛选、排序和页码写入 URL；前端每 10 秒使用 `snapshotId` 调用增量接口。页面隐藏或用户暂停时停止轮询，恢复可见后立即补查；只有倒序第一页且表格位于顶部时自动刷新，否则显示新增数量，避免阅读位置跳动。进入 `/errors/logs/{occurrenceId}` 才读取完整脱敏消息和堆栈，进入详情不会自动产生 LLM 费用。
 
@@ -544,15 +544,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 `v1.0.3` 的异常恢复修复不改变 API 字段和数据库结构。升级时先部署后端和前端，再升级 Agent：后端兼容现有 `v1.0.0` Agent，忽略它持续上报的已删除来源报告；新版 Agent 进一步在配置更新时清理内存旧报告。已存储的服务器旧异常会在下一次成功心跳汇总时修正，无须手工修改数据库。
 
 ```bash
-tar -xzf logmonitor-backend-1.1.2.tar.gz
-sudo sh ./logmonitor-backend-1.1.2/start.sh
+tar -xzf logmonitor-backend-1.1.3.tar.gz
+sudo sh ./logmonitor-backend-1.1.3/start.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.1.2.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.1.2/install.sh
+tar -xzf logmonitor-frontend-1.1.3.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.1.3/install.sh
 
-tar -xzf logmonitor-agent-1.1.2.tar.gz
-sudo ./logmonitor-agent-1.1.2/install.sh
+tar -xzf logmonitor-agent-1.1.3.tar.gz
+sudo ./logmonitor-agent-1.1.3/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -597,7 +597,7 @@ sudo ./logmonitor-agent-1.1.2/install.sh
 
 ### 13.1 版本约定
 
-最新正式发布为 `v1.0.0`，当前源码版本为 `v1.1.2`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.1.3`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
 
 - 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
 - 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.3` -> `v1.1.0`。
@@ -716,6 +716,6 @@ python3 tools/deploy/directory_smoke.py --isolated --url "$BENCH_URL" \
   --agent-java "$AGENT_JAVA_HOME/bin/java" --agent-jar agent/target/logmonitor-agent.jar
 ```
 
-烟测创建匿名 Agent 和来源，运行 35 秒持续写日志和查询目录，核对访问数量与心跳推进；结束仅清理本机临时进程/目录，不自动删除中心的数据，因此不得连接生产。当前源码版本为 v1.1.2，正式发布记录仍为 v1.0.0；本次生成三组件安装包，不自动部署生产。
+烟测创建匿名 Agent 和来源，运行 35 秒持续写日志和查询目录，核对访问数量与心跳推进；结束仅清理本机临时进程/目录，不自动删除中心的数据，因此不得连接生产。该次功能交付的源码版本为 v1.1.2，正式发布记录仍为 v1.0.0；该次生成三组件安装包，不自动部署生产。
 
 本次功能与并行采集验证结果见 [目录浏览验证报告](DIRECTORY_BROWSING_VALIDATION.md)。

@@ -27,18 +27,18 @@ export PATH="$JAVA_HOME/bin:$PATH"
 
 ```text
 release/
-  logmonitor-frontend-1.1.2.tar.gz
-  logmonitor-frontend-1.1.2.tar.gz.sha256
-  logmonitor-backend-1.1.2.tar.gz
-  logmonitor-backend-1.1.2.tar.gz.sha256
-  logmonitor-agent-1.1.2.tar.gz
-  logmonitor-agent-1.1.2.tar.gz.sha256
+  logmonitor-frontend-1.1.3.tar.gz
+  logmonitor-frontend-1.1.3.tar.gz.sha256
+  logmonitor-backend-1.1.3.tar.gz
+  logmonitor-backend-1.1.3.tar.gz.sha256
+  logmonitor-agent-1.1.3.tar.gz
+  logmonitor-agent-1.1.3.tar.gz.sha256
 ```
 
 传输到目标机后先校验，例如：
 
 ```bash
-sha256sum -c logmonitor-backend-1.1.2.tar.gz.sha256
+sha256sum -c logmonitor-backend-1.1.3.tar.gz.sha256
 ```
 
 ## 安装后端
@@ -46,8 +46,8 @@ sha256sum -c logmonitor-backend-1.1.2.tar.gz.sha256
 后端目标机需要 Bash、完整 JDK 17、`nohup` 和 `curl`。安装脚本安装纯 API JAR、nohup 控制脚本、两个安全 application 模板和 MySQL 运维脚本，不会覆盖已有配置；默认运行用户是执行 `sudo sh start.sh` 的原登录用户：
 
 ```bash
-tar -xzf logmonitor-backend-1.1.2.tar.gz
-cd logmonitor-backend-1.1.2
+tar -xzf logmonitor-backend-1.1.3.tar.gz
+cd logmonitor-backend-1.1.3
 sudo START_PROCESS=false sh start.sh
 sudoedit /etc/logmonitor/backend.env
 sudoedit /etc/logmonitor/application.yml
@@ -75,8 +75,8 @@ sudo sh shutdown.sh
 前端目标机需要 Nginx。默认安装到 `/opt/logmonitor/frontend/releases/{版本}`，并原子更新 `current` 软链接；生成的 Nginx server 监听 `127.0.0.1:8081`，把 `/api` 代理到本机后端 `127.0.0.1:8080`：
 
 ```bash
-tar -xzf logmonitor-frontend-1.1.2.tar.gz
-cd logmonitor-frontend-1.1.2
+tar -xzf logmonitor-frontend-1.1.3.tar.gz
+cd logmonitor-frontend-1.1.3
 sudo SERVER_NAME=logmonitor.internal BACKEND_URL=http://127.0.0.1:8080 ./install.sh
 curl -I http://127.0.0.1:8081/
 ```
@@ -88,8 +88,8 @@ curl -I http://127.0.0.1:8081/
 Agent 目标机需要完整 JDK 8 和 `nohup`。安装脚本保留已有 `agent.json`、状态和 spool；首次安装后先确保执行安装的原登录用户对日志根目录具有只读权限，再注册并启动：
 
 ```bash
-tar -xzf logmonitor-agent-1.1.2.tar.gz
-cd logmonitor-agent-1.1.2
+tar -xzf logmonitor-agent-1.1.3.tar.gz
+cd logmonitor-agent-1.1.3
 sudo ./install.sh
 /usr/bin/java -jar /opt/logmonitor-agent/logmonitor-agent.jar \
   configure --config /etc/logmonitor-agent/agent.json
@@ -119,4 +119,4 @@ sudo ./install.sh
 
 ## 实时目录选择
 
-1.1.2 新增中心本机/Agent 的逐层目录浏览。先升级中心和前端，再升级需要浏览的 Agent；旧 Agent 或离线节点保留手动输入。无需数据库迁移、开放 Agent 入站端口或修改 agent.json。目录通道使用既有中心地址与 Token，独立于上传/心跳。
+1.1.3 新增中心本机/Agent 的逐层目录浏览。先升级中心和前端，再升级需要浏览的 Agent；旧 Agent 或离线节点保留手动输入。无需数据库迁移、开放 Agent 入站端口或修改 agent.json。目录通道使用既有中心地址与 Token，独立于上传/心跳。
