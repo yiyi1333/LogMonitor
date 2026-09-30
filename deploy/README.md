@@ -1,6 +1,6 @@
 # 发布与安装
 
-前端、后端和 Agent 是三个独立发布单元。每个组件的 `release.sh` 在构建机执行，生成带版本号的 `tar.gz` 和对应的 SHA-256 文件；压缩包内自带该组件的 `install.sh`，在目标 Linux 主机解压后执行。
+前端、后端和 Agent 是三个独立发布单元。每个组件的 `release.sh` 在构建机执行，生成带版本号的 `tar.gz` 和对应的 SHA-256 文件；后端包提供 `start.sh` / `shutdown.sh`，前端和 Agent 包提供 `install.sh`，在目标 Linux 主机解压后执行。
 
 ## 生成发布包
 
@@ -27,43 +27,43 @@ export PATH="$JAVA_HOME/bin:$PATH"
 
 ```text
 release/
-  logmonitor-frontend-1.1.0.tar.gz
-  logmonitor-frontend-1.1.0.tar.gz.sha256
-  logmonitor-backend-1.1.0.tar.gz
-  logmonitor-backend-1.1.0.tar.gz.sha256
-  logmonitor-agent-1.1.0.tar.gz
-  logmonitor-agent-1.1.0.tar.gz.sha256
+  logmonitor-frontend-1.1.1.tar.gz
+  logmonitor-frontend-1.1.1.tar.gz.sha256
+  logmonitor-backend-1.1.1.tar.gz
+  logmonitor-backend-1.1.1.tar.gz.sha256
+  logmonitor-agent-1.1.1.tar.gz
+  logmonitor-agent-1.1.1.tar.gz.sha256
 ```
 
 传输到目标机后先校验，例如：
 
 ```bash
-sha256sum -c logmonitor-backend-1.1.0.tar.gz.sha256
+sha256sum -c logmonitor-backend-1.1.1.tar.gz.sha256
 ```
 
 ## 安装后端
 
-后端目标机需要完整 JDK 17、`nohup` 和 `curl`。安装脚本安装纯 API JAR、nohup 控制脚本、两个安全 application 模板和 MySQL 运维脚本，不会覆盖已有配置；默认运行用户是执行 `sudo ./install.sh` 的原登录用户：
+后端目标机需要 Bash、完整 JDK 17、`nohup` 和 `curl`。安装脚本安装纯 API JAR、nohup 控制脚本、两个安全 application 模板和 MySQL 运维脚本，不会覆盖已有配置；默认运行用户是执行 `sudo sh start.sh` 的原登录用户：
 
 ```bash
-tar -xzf logmonitor-backend-1.1.0.tar.gz
-cd logmonitor-backend-1.1.0
-sudo ./install.sh
+tar -xzf logmonitor-backend-1.1.1.tar.gz
+cd logmonitor-backend-1.1.1
+sudo START_PROCESS=false sh start.sh
 sudoedit /etc/logmonitor/backend.env
 sudoedit /etc/logmonitor/application.yml
 sudoedit /etc/logmonitor/application-prod.yml
 # DBA 先执行 mysql/logm-init.sql 或 mysql/migrations/ 中尚未应用的增量脚本
-/opt/logmonitor/backend/logmonitor-backend.sh start
+sudo sh start.sh
 /opt/logmonitor/backend/logmonitor-backend.sh status
 curl http://127.0.0.1:8080/api/health
 ```
 
-必须替换 `backend.env` 中的数据库密码、管理员初始密码和 LLM 主密钥占位符。两个 application 文件从安全 example 首次安装并由控制脚本作为外部配置加载，后续安装不会覆盖。生产启动不会执行 Flyway 迁移；它只读校验 MySQL 8.0.36+、InnoDB 和 `schema_metadata`，因此 DBA 必须先完成数据库初始化或升级。控制脚本使用 `nohup java -jar` 启动，并在 60 秒内轮询 `/api/health`；校验失败、进程退出或健康检查超时会输出最近日志、停止新进程并返回失败。若数据库和配置已提前准备好，可用 `sudo START_PROCESS=true ./install.sh` 在安装完成后直接启动。升级正在运行的 systemd 或 nohup 版本时，应先停止后端并完成数据库升级；安装脚本仍会保留配置和数据，并将旧服务迁移为 nohup。
+必须替换 `backend.env` 中的数据库密码、管理员初始密码和 LLM 主密钥占位符。两个 application 文件从安全 example 首次安装并由控制脚本作为外部配置加载，后续安装不会覆盖。生产启动不会执行 Flyway 迁移；它只读校验 MySQL 8.0.36+、InnoDB 和 `schema_metadata`，因此 DBA 必须先完成数据库初始化或升级。控制脚本使用 `nohup java -jar` 启动，并在 60 秒内轮询 `/api/health`；校验失败、进程退出或健康检查超时会输出最近日志、停止新进程并返回失败。若数据库和配置已提前准备好，可用 `sudo sh start.sh` 在安装完成后直接启动（默认 START_PROCESS=true）。两个入口支持 `sh` 调用并自动切换到 Bash；`shutdown.sh` 不删除配置或数据。自定义 APP_DIR 时启动与停止需使用相同值。升级正在运行的 systemd 或 nohup 版本时，应先停止后端并完成数据库升级；安装脚本仍会保留配置和数据，并将旧服务迁移为 nohup。
 
 常用控制命令：
 
 ```bash
-/opt/logmonitor/backend/logmonitor-backend.sh stop
+sudo sh shutdown.sh
 /opt/logmonitor/backend/logmonitor-backend.sh restart
 /opt/logmonitor/backend/logmonitor-backend.sh logs
 ```
@@ -75,8 +75,8 @@ curl http://127.0.0.1:8080/api/health
 前端目标机需要 Nginx。默认安装到 `/opt/logmonitor/frontend/releases/{版本}`，并原子更新 `current` 软链接；生成的 Nginx server 监听 `127.0.0.1:8081`，把 `/api` 代理到本机后端 `127.0.0.1:8080`：
 
 ```bash
-tar -xzf logmonitor-frontend-1.1.0.tar.gz
-cd logmonitor-frontend-1.1.0
+tar -xzf logmonitor-frontend-1.1.1.tar.gz
+cd logmonitor-frontend-1.1.1
 sudo SERVER_NAME=logmonitor.internal BACKEND_URL=http://127.0.0.1:8080 ./install.sh
 curl -I http://127.0.0.1:8081/
 ```
@@ -88,8 +88,8 @@ curl -I http://127.0.0.1:8081/
 Agent 目标机需要完整 JDK 8 和 `nohup`。安装脚本保留已有 `agent.json`、状态和 spool；首次安装后先确保执行安装的原登录用户对日志根目录具有只读权限，再注册并启动：
 
 ```bash
-tar -xzf logmonitor-agent-1.1.0.tar.gz
-cd logmonitor-agent-1.1.0
+tar -xzf logmonitor-agent-1.1.1.tar.gz
+cd logmonitor-agent-1.1.1
 sudo ./install.sh
 /usr/bin/java -jar /opt/logmonitor-agent/logmonitor-agent.jar \
   configure --config /etc/logmonitor-agent/agent.json

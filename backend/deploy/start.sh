@@ -1,4 +1,9 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# Accept both `sh start.sh` and direct execution; the implementation requires Bash.
+if [ -z "${BASH_VERSION:-}" ]; then
+    command -v bash >/dev/null 2>&1 || { echo "Bash is required" >&2; exit 1; }
+    exec bash "$0" "$@"
+fi
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -11,7 +16,7 @@ CONFIG_DIR=${CONFIG_DIR:-/etc/logmonitor}
 DATA_DIR=${DATA_DIR:-/var/lib/logmonitor/backend}
 LEGACY_SERVICE_DIR=${LEGACY_SERVICE_DIR:-/etc/systemd/system}
 JAVA_BIN=${JAVA_BIN:-/usr/bin/java}
-START_PROCESS=${START_PROCESS:-${ENABLE_SERVICE:-false}}
+START_PROCESS=${START_PROCESS:-${ENABLE_SERVICE:-true}}
 
 require_commands() {
     local missing=()
@@ -21,7 +26,7 @@ require_commands() {
     done
     if ((${#missing[@]})); then
         echo "Missing required command(s): ${missing[*]}" >&2
-        echo "Install the packages providing these commands and run install.sh again." >&2
+        echo "Install the packages providing these commands and run start.sh again." >&2
         return 1
     fi
 }

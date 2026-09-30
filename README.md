@@ -1,6 +1,6 @@
 # LogMonitor
 
-![Version](https://img.shields.io/badge/version-v1.1.0-1f6feb)
+![Version](https://img.shields.io/badge/version-v1.1.1-1f6feb)
 ![License](https://img.shields.io/badge/license-MIT-2ea44f)
 ![Backend](https://img.shields.io/badge/backend-Spring%20Boot%203%20%2F%20JDK%2017-6db33f)
 ![Frontend](https://img.shields.io/badge/frontend-Vue%203%20%2F%20TypeScript-42b883)
@@ -9,7 +9,7 @@
 
 LogMonitor is an operations-focused log analytics platform. It continuously ingests Spring Boot text logs from local directories or remote servers, recognizes requests and multi-line failures, aggregates trends by application namespace, and optionally sends redacted context to multiple LLM providers for analysis.
 
-当前版本 / Current version: **v1.1.0**
+当前版本 / Current version: **v1.1.1**
 
 ## 语言 / Languages
 
@@ -157,9 +157,9 @@ cd ../agent && export JAVA_HOME=/path/to/jdk-8 && ./deploy/release.sh
 当前版本产物示例 / Current artifact names:
 
 ```text
-release/logmonitor-frontend-1.1.0.tar.gz
-release/logmonitor-backend-1.1.0.tar.gz
-release/logmonitor-agent-1.1.0.tar.gz
+release/logmonitor-frontend-1.1.1.tar.gz
+release/logmonitor-backend-1.1.1.tar.gz
+release/logmonitor-agent-1.1.1.tar.gz
 ```
 
 安装脚本默认将后端以 nohup 运行在 `/opt/logmonitor/backend`，前端由 Nginx 提供并监听 `127.0.0.1:8081`，Agent 使用 `/opt/logmonitor-agent` 和 `/var/lib/logmonitor-agent`。生产入口必须由 TLS 反向代理保护并保持页面与 `/api` 同源。
