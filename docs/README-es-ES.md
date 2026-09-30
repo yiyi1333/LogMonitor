@@ -1,6 +1,6 @@
 # LogMonitor
 
-Versión actual: **v1.0.6**
+Versión actual: **v1.0.8**
 
 LogMonitor es una plataforma de análisis de logs para operaciones. Recopila logs de Spring Boot locales o remotos, agrupa errores, muestra tendencias por espacio de nombres y puede solicitar análisis a proveedores LLM después de ocultar datos sensibles.
 

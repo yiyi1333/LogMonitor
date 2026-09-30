@@ -544,15 +544,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 `v1.0.3` 的异常恢复修复不改变 API 字段和数据库结构。升级时先部署后端和前端，再升级 Agent：后端兼容现有 `v1.0.0` Agent，忽略它持续上报的已删除来源报告；新版 Agent 进一步在配置更新时清理内存旧报告。已存储的服务器旧异常会在下一次成功心跳汇总时修正，无须手工修改数据库。
 
 ```bash
-tar -xzf logmonitor-backend-1.0.6.tar.gz
-sudo ./logmonitor-backend-1.0.6/install.sh
+tar -xzf logmonitor-backend-1.0.8.tar.gz
+sudo ./logmonitor-backend-1.0.8/install.sh
 /opt/logmonitor/backend/logmonitor-backend.sh start
 
-tar -xzf logmonitor-frontend-1.0.6.tar.gz
-sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.6/install.sh
+tar -xzf logmonitor-frontend-1.0.8.tar.gz
+sudo SERVER_NAME=logmonitor.internal ./logmonitor-frontend-1.0.8/install.sh
 
-tar -xzf logmonitor-agent-1.0.6.tar.gz
-sudo ./logmonitor-agent-1.0.6/install.sh
+tar -xzf logmonitor-agent-1.0.8.tar.gz
+sudo ./logmonitor-agent-1.0.8/install.sh
 /opt/logmonitor-agent/logmonitor-agent.sh start
 ```
 
@@ -597,7 +597,7 @@ sudo ./logmonitor-agent-1.0.6/install.sh
 
 ### 13.1 版本约定
 
-最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.6`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
+最新正式发布为 `v1.0.0`，当前源码版本为 `v1.0.8`。正式发布记录与源码版本分别维护，只有完成正式发布才更新发布记录。
 
 - 每次普通 commit（包括文档、配置与项目约定）将当前 patch 加一，例如 `v1.0.0` -> `v1.0.1`。
 - 每次正式发布将当前 minor 加一并将 patch 归零，例如 `v1.0.3` -> `v1.1.0`。
@@ -672,3 +672,12 @@ Agent 读取使用单写线程，每轮按文件轮转读取，单轮最多 1 �
 6. README 是否仍能正确链接到本文档和运行架构图谱。
 
 仓库 `AGENTS.md` 已将上述同步要求设为开发工作流规则。文档变更应与功能代码一起评审和提交，不应在发布后补写。
+
+
+## 独立 Ubuntu RabbitMQ 安装工具
+
+`deploy/rabbitmq/install.sh` 使用本地 `.deb` 安装 RabbitMQ，默认通过 APT 的 `--no-download` 离线解析依赖，包目录须提供兼容的 Erlang 和全部缺失依赖。`--online-deps` 允许从系统现有源下载缺失依赖，不添加 RabbitMQ 软件源；`--management` 启用管理插件并重启服务。脚本检查 Ubuntu/systemd、包架构及重复版本，拒绝已有 RabbitMQ 的跨版本升级/降级，禁止 APT 移除现有包，最后验证服务就绪并启用开机启动。它不创建账号、不配置防火墙，LogMonitor 本身不依赖 RabbitMQ。包签名来源及 Erlang 兼容性由部署人员按官方文档核实；安装操作不保证失败回滚。准备与使用命令见 [安装说明](../deploy/rabbitmq/README.md)。
+
+```bash
+sudo bash deploy/rabbitmq/install.sh --management /opt/rabbitmq-packages
+```
